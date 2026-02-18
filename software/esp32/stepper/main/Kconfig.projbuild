@@ -1,0 +1,34 @@
+menu "Stepper Configuration"
+
+    config STEPPER_WIFI_SSID
+        string "WiFi SSID"
+        default "MusicalBox"
+        help
+            SSID (network name) for the example to connect to.
+
+    config STEPPER_WIFI_PASSWORD
+        string "WiFi Password"
+        default ""
+        help
+            WiFi password (WPA or WPA2) for the example to use.
+            Can be left blank if the network has no security set.
+
+    config STEPPER_FIRMWARE_UPG_URL
+        string "Firmware Upgrade URL"
+        default "https://10.10.3.1:8070/stepper.bin"
+        help
+            URL of server which hosts the firmware image.
+
+    config STEPPER_SKIP_COMMON_NAME_CHECK
+        bool "Skip server certificate CN fieldcheck"
+        default n
+        help
+            This allows you to skip the validation of OTA server certificate CN field.
+
+    config STEPPER_OTA_RECV_TIMEOUT_MS
+        int "OTA Receive Timeout in milliseconds"
+        default 5000
+        help
+            Maximum time for reception
+
+endmenu
