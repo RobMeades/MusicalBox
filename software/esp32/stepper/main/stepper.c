@@ -35,22 +35,32 @@
 #include "driver/gpio.h"
 #include "errno.h"
 #include "esp_wifi.h"
+#include "esp_wifi_types.h"
+#include "esp_phy_init.h"
+#include "driver/uart.h"
+#include "lwip/inet.h"
+#include "lwip/sockets.h"
+#include "lwip/netdb.h"
+#include "ping/ping_sock.h"
 
 /* ----------------------------------------------------------------
  * COMPILE-TIME MACROS
  * -------------------------------------------------------------- */
 
 // OTA buffer
-#define BUFFSIZE 1024
+#define OTA_BUFFER_SIZE 1024
 
 // Downloaded file header buffer
-#define HEADER_BUFFER_SIZE 8192
+#define OTA_FILE_HEADER_BUFFER_SIZE 8192
 
 // SHA-256 digest length
 #define HASH_LEN 32 
 
 // OTA URL buffer
 #define OTA_URL_SIZE 256
+
+// UART buffer
+#define UART_RX_BUFFFER_SIZE 256
 
 /* ----------------------------------------------------------------
  * TYPES
@@ -63,12 +73,28 @@
 static const char *TAG = "stepper";
 
 // An OTA data write buffer ready to write to the flash
-static char ota_write_data[BUFFSIZE + 1] = { 0 };
+static char g_ota_write_data[OTA_BUFFER_SIZE + 1] = { 0 };
 
 // Buffer for accumulating header data
-static char header_buffer[HEADER_BUFFER_SIZE] = { 0 };
-extern const uint8_t server_cert_pem_start[] asm("_binary_ca_cert_pem_start");
-extern const uint8_t server_cert_pem_end[] asm("_binary_ca_cert_pem_end");
+static char g_header_buffer[OTA_FILE_HEADER_BUFFER_SIZE] = { 0 };
+extern const uint8_t g_server_cert_pem_start[] asm("_binary_ca_cert_pem_start");
+extern const uint8_t g_server_cert_pem_end[] asm("_binary_ca_cert_pem_end");
+
+// Semaphore for WiFi synchronization
+SemaphoreHandle_t g_wifi_semaphore = NULL;
+
+// Wifi network interface
+esp_netif_t *g_sta_netif = NULL;
+
+// UART configuration
+static const uart_config_t g_uart_config = {
+    .baud_rate = CONFIG_STEPPER_UART_BAUD_RATE,
+    .data_bits = UART_DATA_8_BITS,
+    .parity = UART_PARITY_DISABLE,
+    .stop_bits = UART_STOP_BITS_1,
+    .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+    .source_clk = UART_SCLK_DEFAULT,
+};
 
 /* ----------------------------------------------------------------
  * STATIC FUNCTIONS: EVENT HANDLERS
@@ -78,10 +104,27 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data)
 {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+        ESP_LOGI(TAG, "WiFi started, connecting...");
         esp_wifi_connect();
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED) {
+        ESP_LOGI(TAG, "WiFi connected to AP");
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        ESP_LOGI(TAG, "WiFi disconnected, attempting to reconnect...");
+        wifi_event_sta_disconnected_t *event = (wifi_event_sta_disconnected_t*) event_data;
+        ESP_LOGI(TAG, "WiFi disconnected, reason: %d", event->reason);
+        
+        // Print the AP info that failed
+        ESP_LOGI(TAG, "AP SSID: %.32s", event->ssid);
+        ESP_LOGI(TAG, "AP BSSID: %02x:%02x:%02x:%02x:%02x:%02x",
+                event->bssid[0], event->bssid[1], event->bssid[2],
+                event->bssid[3], event->bssid[4], event->bssid[5]);
+        ESP_LOGI(TAG, "Reason: %d", event->reason);
+
+        ESP_LOGI(TAG, "Attempting to reconnect...");
         esp_wifi_connect();
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_AUTHMODE_CHANGE) {
+        wifi_event_sta_authmode_change_t *event = (wifi_event_sta_authmode_change_t*) event_data;
+        ESP_LOGI(TAG, "Authmode changed from %d to %d", 
+                 event->old_mode, event->new_mode);
     }
 }
 
@@ -92,31 +135,59 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base,
         ip_event_got_ip_t *event = (ip_event_got_ip_t *) event_data;
         ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
         
-        SemaphoreHandle_t semaphore = (SemaphoreHandle_t)arg;
+        SemaphoreHandle_t semaphore = (SemaphoreHandle_t) arg;
         if (semaphore != NULL) {
             xSemaphoreGive(semaphore);
         }
     }
 }
 
+// Return a hostname string from a URL.  The string is
+// returned in the given buffer and the string length
+// (i.e. what strlen() would return) is the return value.
+// IMPORTANT the length returned may be larger than
+// buffer_len if buffer_len is not big enough to hold
+// the (null terminated) string, i.e. buffer_len must be
+// at least the expected host name length plus one.
+static int hostname_from_url(char *url, char *buffer, int buffer_len)
+{
+    int length = 0;
+    char *hostname_start = strstr(url, "//");
+    int buffer_used = 0;
+
+    if (hostname_start && buffer_len > 0) {
+        hostname_start += 2;
+        for (char *p = hostname_start;
+             (*p != 0) && (*p != '/') && (*p != ':');
+             p++) {
+            if (buffer_used < buffer_len - 1) {
+                buffer[buffer_used] = *p;
+                buffer_used++;
+            }
+            length++;
+        }
+        // Add terminator
+        buffer[buffer_used] = 0;
+    }
+
+    return length;
+}
+
 /* ----------------------------------------------------------------
  * STATIC FUNCTIONS: MISC
  * -------------------------------------------------------------- */
 
-static void http_cleanup(esp_http_client_handle_t client)
-{
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
-}
-
-static void __attribute__((noreturn)) task_fatal_error(void)
-{
-    ESP_LOGE(TAG, "Exiting task due to fatal error...");
-    (void)vTaskDelete(NULL);
-
-    while (1) {}
-}
-
+ static void infinite_loop(void)
+ {
+     int i = 0;
+     ESP_LOGI(TAG, "When new firmware is available on the server, press the reset button to download it.");
+     while(1) {
+         ESP_LOGI(TAG, "Waiting for a new firmware ... %d", ++i);
+         vTaskDelay(2000 / portTICK_PERIOD_MS);
+     }
+ }
+ 
+ 
 static void print_sha256 (const uint8_t *image_hash, const char *label)
 {
     char hash_print[HASH_LEN * 2 + 1];
@@ -127,15 +198,131 @@ static void print_sha256 (const uint8_t *image_hash, const char *label)
     ESP_LOGI(TAG, "%s: %s", label, hash_print);
 }
 
-static void infinite_loop(void)
+/* ----------------------------------------------------------------
+ * STATIC FUNCTIONS: CLEAN-UP
+ * -------------------------------------------------------------- */
+
+static void http_cleanup(esp_http_client_handle_t client)
 {
-    int i = 0;
-    ESP_LOGI(TAG, "When new firmware is available on the server, press the reset button to download it.");
-    while(1) {
-        ESP_LOGI(TAG, "Waiting for a new firmware ... %d", ++i);
-        vTaskDelay(2000 / portTICK_PERIOD_MS);
-    }
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
 }
+
+static void __attribute__((noreturn)) task_fatal_error()
+{
+    ESP_LOGE(TAG, "Exiting task due to fatal error...");
+    vTaskDelete(NULL);
+
+    vTaskDelay(pdMS_TO_TICKS(5000));
+    esp_restart();
+
+    while(1) {}
+}
+
+
+/* ----------------------------------------------------------------
+ * STATIC FUNCTIONS: PING THE SERVER
+ * -------------------------------------------------------------- */
+
+// Call back to ping session called on receipt of a successful ping response.
+static void cmd_ping_on_ping_success(esp_ping_handle_t hdl, void *args)
+{
+    uint8_t ttl;
+    uint16_t seqno;
+    uint32_t elapsed_time, recv_len;
+    ip_addr_t target_addr;
+    esp_ping_get_profile(hdl, ESP_PING_PROF_SEQNO, &seqno, sizeof(seqno));
+    esp_ping_get_profile(hdl, ESP_PING_PROF_TTL, &ttl, sizeof(ttl));
+    esp_ping_get_profile(hdl, ESP_PING_PROF_IPADDR, &target_addr, sizeof(target_addr));
+    esp_ping_get_profile(hdl, ESP_PING_PROF_SIZE, &recv_len, sizeof(recv_len));
+    esp_ping_get_profile(hdl, ESP_PING_PROF_TIMEGAP, &elapsed_time, sizeof(elapsed_time));
+    ESP_LOGI(TAG, "ping: %" PRIu32 " bytes from %s icmp_seq=%" PRIu16 " ttl=%" PRIu16 " time=%" PRIu32 " ms",
+        recv_len, ipaddr_ntoa((ip_addr_t*)&target_addr), seqno, ttl, elapsed_time);
+}
+
+// Call back to ping session called on a ping timeout.
+static void cmd_ping_on_ping_timeout(esp_ping_handle_t hdl, void *args)
+{
+    uint16_t seqno;
+    ip_addr_t target_addr;
+    esp_ping_get_profile(hdl, ESP_PING_PROF_SEQNO, &seqno, sizeof(seqno));
+    esp_ping_get_profile(hdl, ESP_PING_PROF_IPADDR, &target_addr, sizeof(target_addr));
+    ESP_LOGI(TAG, "ping: from %s icmp_seq=%d timeout",ipaddr_ntoa((ip_addr_t*)&target_addr), seqno);
+}
+
+// Call back to ping session called at end.
+static void cmd_ping_on_ping_end(esp_ping_handle_t hdl, void *args)
+{
+    ip_addr_t target_addr;
+    uint32_t transmitted;
+    uint32_t received;
+    uint32_t total_time_ms;
+    uint32_t loss;
+
+    esp_ping_get_profile(hdl, ESP_PING_PROF_REQUEST, &transmitted, sizeof(transmitted));
+    esp_ping_get_profile(hdl, ESP_PING_PROF_REPLY, &received, sizeof(received));
+    esp_ping_get_profile(hdl, ESP_PING_PROF_IPADDR, &target_addr, sizeof(target_addr));
+    esp_ping_get_profile(hdl, ESP_PING_PROF_DURATION, &total_time_ms, sizeof(total_time_ms));
+
+    if (transmitted > 0) {
+        loss = (uint32_t)((1 - ((float)received) / transmitted) * 100);
+    } else {
+        loss = 0;
+    }
+    ESP_LOGI(TAG, "ping: %" PRIu32 " packets transmitted, %" PRIu32 " received, %" PRIu32 "%% packet loss, average time %" PRIu32 " ms",
+                  transmitted, received, loss, total_time_ms / received);
+    // delete the ping sessions, so that we clean up all resources and can create a new ping session
+    // we don't have to call delete function in the callback, instead we can call delete function from other tasks
+    esp_ping_delete_session(hdl);
+}
+
+// Ping the given host name, which should be a null-terminated string.
+static esp_err_t ping_start(char *hostname_str)
+{
+    esp_err_t err = ESP_FAIL;
+    esp_ping_config_t config = ESP_PING_DEFAULT_CONFIG();
+    struct addrinfo hint;
+    struct addrinfo *res = NULL;
+    memset(&hint, 0, sizeof(hint));
+ 
+    /* convert ip4 string or hostname to ip4 address */
+    ip_addr_t target_addr;
+    memset(&target_addr, 0, sizeof(target_addr));
+
+    if (getaddrinfo(hostname_str, NULL, &hint, &res) != 0) {
+        ESP_LOGI(TAG, "ping: unknown host: %s", hostname_str);
+    } else {
+        if (res->ai_family == AF_INET) {
+            struct in_addr addr4 = ((struct sockaddr_in *) (res->ai_addr))->sin_addr;
+            inet_addr_to_ip4addr(ip_2_ip4(&target_addr), &addr4);
+        }
+        config.target_addr = target_addr;
+        /* set callback functions */
+        esp_ping_callbacks_t cbs = {
+            .cb_args = NULL,
+            .on_ping_success = cmd_ping_on_ping_success,
+            .on_ping_timeout = cmd_ping_on_ping_timeout,
+            .on_ping_end = cmd_ping_on_ping_end
+        };
+        esp_ping_handle_t ping;
+        err = esp_ping_new_session(&config, &cbs, &ping);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "ping: failed to initialise ping session");
+        } else {
+            err = esp_ping_start(ping);
+            if (err != ESP_OK) {
+                ESP_LOGW(TAG, "ping: failed to start ping to \"%s\"", hostname_str);
+            }
+        }
+    }
+    freeaddrinfo(res);
+
+    return err;
+}
+
+/* ----------------------------------------------------------------
+ * STATIC FUNCTIONS: OTA
+ * -------------------------------------------------------------- */
 
 // Check if we have enough data to parse the firmware header
 //
@@ -254,7 +441,7 @@ static void ota_task(void *pvParameter)
 
     esp_http_client_config_t config = {
         .url = CONFIG_STEPPER_FIRMWARE_UPG_URL,
-        .cert_pem = (char *)server_cert_pem_start,
+        .cert_pem = (char *)g_server_cert_pem_start,
         .timeout_ms = CONFIG_STEPPER_OTA_RECV_TIMEOUT_MS,
         .keep_alive_enable = true,
         .buffer_size = 2048,  /* Slightly larger buffer for better throughput */
@@ -298,7 +485,7 @@ static void ota_task(void *pvParameter)
     
     // Deal with all receive packets
     while (!transfer_complete && !connection_error && !same_version_detected) {
-        int data_read = esp_http_client_read(client, ota_write_data, BUFFSIZE);
+        int data_read = esp_http_client_read(client, g_ota_write_data, OTA_BUFFER_SIZE);
         
         if (data_read < 0) {
             ESP_LOGE(TAG, "Error: SSL data read error");
@@ -310,10 +497,10 @@ static void ota_task(void *pvParameter)
             
             if (image_header_was_checked == false) {
                 // Accumulate data until we have enough to parse the header
-                if (header_accumulated + data_read <= HEADER_BUFFER_SIZE) {
-                    memcpy(header_buffer + header_accumulated, ota_write_data, data_read);
+                if (header_accumulated + data_read <= OTA_FILE_HEADER_BUFFER_SIZE) {
+                    memcpy(g_header_buffer + header_accumulated, g_ota_write_data, data_read);
                     header_accumulated += data_read;
-                    ESP_LOGI(TAG, "Accumulated %d/%d bytes for header", header_accumulated, HEADER_BUFFER_SIZE);
+                    ESP_LOGI(TAG, "Accumulated %d/%d bytes for header", header_accumulated, OTA_FILE_HEADER_BUFFER_SIZE);
                 } else {
                     ESP_LOGE(TAG, "Header buffer overflow!");
                     http_cleanup(client);
@@ -324,7 +511,7 @@ static void ota_task(void *pvParameter)
                 if (has_complete_header(header_accumulated)) {
                     ESP_LOGI(TAG, "Complete header accumulated (%d bytes)", header_accumulated);
                     
-                    int parse_result = parse_firmware_header(header_buffer, header_accumulated, 
+                    int parse_result = parse_firmware_header(g_header_buffer, header_accumulated, 
                                                              running, &update_handle, update_partition);
 
                     if (parse_result == 1) {
@@ -361,7 +548,7 @@ static void ota_task(void *pvParameter)
                 }
             } else {
                 // Header already processed, write data directly
-                err = esp_ota_write(update_handle, (const void *)ota_write_data, data_read);
+                err = esp_ota_write(update_handle, (const void *)g_ota_write_data, data_read);
                 if (err != ESP_OK) {
                     ESP_LOGE(TAG, "esp_ota_write failed");
                     http_cleanup(client);
@@ -474,17 +661,12 @@ static void ota_task(void *pvParameter)
 }
 
 /* ----------------------------------------------------------------
- * PUBLIC FUNCTIONS
+ * STATIC FUNCTIONS: INITIALISATION
  * -------------------------------------------------------------- */
 
-// Entry point
-void app_main(void)
+// Initialise the non-volatile memory
+static esp_err_t nvs_init()
 {
-    ESP_LOGI(TAG, "Stepper app_main start");
-    
-    esp_err_t err = ESP_OK;
-    bool init_successful = true;
-    
     uint8_t sha_256[HASH_LEN] = { 0 };
     esp_partition_t partition;
 
@@ -508,7 +690,8 @@ void app_main(void)
 
     const esp_partition_t *running = esp_ota_get_running_partition();
     esp_ota_img_states_t ota_state;
-    if (esp_ota_get_state_partition(running, &ota_state) == ESP_OK) {
+    esp_err_t err = esp_ota_get_state_partition(running, &ota_state);
+    if (err == ESP_OK) {
         if (ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
             ESP_LOGI(TAG, "No diagnostic, continuing execution ...");
             esp_ota_mark_app_valid_cancel_rollback();
@@ -526,93 +709,80 @@ void app_main(void)
             err = nvs_flash_init();
         } else {
             ESP_LOGE(TAG, "Failed to erase NVS: %s", esp_err_to_name(erase_err));
-            init_successful = false;
         }
     }
-    
+
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize NVS: %s", esp_err_to_name(err));
-        init_successful = false;
     }
 
+    return err;
+}
+
+// Initialise networking: on exit g_sta_netif will be non-NULL,
+// as will g_wifi_semaphore; requires the default event loop to
+// have been created.
+static esp_err_t networking_init()
+{
     // Initialize network interface
-    if (init_successful) {
-        esp_err_t netif_init_err = esp_netif_init();
-        if (netif_init_err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to initialize network interface: %s", esp_err_to_name(netif_init_err));
-            init_successful = false;
-        }
-    }
-
-    // Create default event loop
-    if (init_successful) {
-        esp_err_t event_loop_err = esp_event_loop_create_default();
-        if (event_loop_err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to create default event loop: %s", esp_err_to_name(event_loop_err));
-            init_successful = false;
-        }
+    esp_err_t err = esp_netif_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize network interface: %s", esp_err_to_name(err));
     }
 
     // Create semaphore for WiFi synchronization
-    SemaphoreHandle_t wifi_semaphore = NULL;
-    if (init_successful) {
-        wifi_semaphore = xSemaphoreCreateBinary();
-        if (wifi_semaphore == NULL) {
+    if (err == ESP_OK && g_wifi_semaphore == NULL) {
+        g_wifi_semaphore = xSemaphoreCreateBinary();
+        if (g_wifi_semaphore == NULL) {
             ESP_LOGE(TAG, "Failed to create WiFi semaphore");
-            init_successful = false;
+            err = ESP_ERR_NO_MEM;
         }
     }
 
     // Create default WiFi station
-    esp_netif_t *sta_netif = NULL;
-    if (init_successful) {
-        sta_netif = esp_netif_create_default_wifi_sta();
-        if (sta_netif == NULL) {
+    if (err == ESP_OK) {
+        g_sta_netif = esp_netif_create_default_wifi_sta();
+        if (g_sta_netif == NULL) {
             ESP_LOGE(TAG, "Failed to create default WiFi station");
-            init_successful = false;
+            err = ESP_ERR_NO_MEM;
         }
     }
 
     // Initialize WiFi
-    if (init_successful) {
+    if (err == ESP_OK) {
         wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-        esp_err_t wifi_init_err = esp_wifi_init(&cfg);
-        if (wifi_init_err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to initialize WiFi: %s", esp_err_to_name(wifi_init_err));
-            init_successful = false;
+        err = esp_wifi_init(&cfg);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to initialize WiFi: %s", esp_err_to_name(err));
         }
     }
 
     // Register event handlers for WiFi and IP
-    if (init_successful) {
-        esp_err_t event_handler_err = esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, 
-                                                                  &wifi_event_handler, NULL);
-        if (event_handler_err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to register WiFi event handler: %s", esp_err_to_name(event_handler_err));
-            init_successful = false;
+    if (err == ESP_OK) {
+        err = esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, 
+                                         &wifi_event_handler, NULL);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to register WiFi event handler: %s", esp_err_to_name(err));
         }
     }
-    
-    if (init_successful) {
-        esp_err_t event_handler_err = esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, 
-                                                                  &ip_event_handler, wifi_semaphore);
-        if (event_handler_err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to register IP event handler: %s", esp_err_to_name(event_handler_err));
-            init_successful = false;
+    if (err == ESP_OK) {
+        err = esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, 
+                                         &ip_event_handler, g_wifi_semaphore);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to register IP event handler: %s", esp_err_to_name(err));
         }
     }
 
     // Set WiFi to station mode
-    if (init_successful) {
-        esp_err_t mode_err = esp_wifi_set_mode(WIFI_MODE_STA);
-        if (mode_err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to set WiFi mode: %s", esp_err_to_name(mode_err));
-            init_successful = false;
+    if (err == ESP_OK) {
+        err = esp_wifi_set_mode(WIFI_MODE_STA);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to set WiFi mode: %s", esp_err_to_name(err));
         }
     }
 
     // Configure WiFi connection
-    if (init_successful) {
+    if (err == ESP_OK) {
         wifi_config_t wifi_config = {
             .sta = {
                 .ssid = CONFIG_STEPPER_WIFI_SSID,
@@ -625,38 +795,34 @@ void app_main(void)
             },
         };
 
-        esp_err_t config_err = esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
-        if (config_err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to set WiFi configuration: %s", esp_err_to_name(config_err));
-            init_successful = false;
+        err = esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to set WiFi configuration: %s", esp_err_to_name(err));
         }
     }
 
     // Start WiFi
-    if (init_successful) {
-        esp_err_t start_err = esp_wifi_start();
-        if (start_err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to start WiFi: %s", esp_err_to_name(start_err));
-            init_successful = false;
+    if (err == ESP_OK) {
+        err = esp_wifi_start();
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to start WiFi: %s", esp_err_to_name(err));
         } else {
             ESP_LOGI(TAG, "WiFi connecting to %s...", CONFIG_STEPPER_WIFI_SSID);
         }
     }
 
     // Wait for IP address (with timeout)
-    bool got_ip = false;
-    if (init_successful) {
-        if (xSemaphoreTake(wifi_semaphore, pdMS_TO_TICKS(10000)) == pdTRUE) {
-            got_ip = true;
+    if (err == ESP_OK) {
+        if (xSemaphoreTake(g_wifi_semaphore, pdMS_TO_TICKS(60000)) == pdTRUE) {
             ESP_LOGI(TAG, "WiFi connected, IP obtained");
         } else {
             ESP_LOGE(TAG, "Failed to obtain IP address within timeout");
-            init_successful = false;
+            err = ESP_ERR_TIMEOUT;
         }
     }
 
     // Disable WiFi power save mode for best OTA operation
-    if (init_successful && got_ip) {
+    if (err == ESP_OK) {
         esp_err_t ps_err = esp_wifi_set_ps(WIFI_PS_NONE);
         if (ps_err != ESP_OK) {
             ESP_LOGW(TAG, "Failed to disable WiFi power save: %s", esp_err_to_name(ps_err));
@@ -664,31 +830,90 @@ void app_main(void)
         }
     }
 
+    // Clean-up on error
+    if (err != ESP_OK) {
+        if (g_sta_netif) {
+            esp_netif_destroy_default_wifi(g_sta_netif);
+            g_sta_netif = NULL;
+            // Can't clean up g_wifi_semaphore as it may still be taken
+        }
+    }
+
+    return err;
+}
+
+/* ----------------------------------------------------------------
+ * PUBLIC FUNCTIONS
+ * -------------------------------------------------------------- */
+
+// Entry point
+void app_main(void)
+{
+    ESP_LOGI(TAG, "Stepper app_main start");
+
+    // Create the default event loop, for everyone's use
+    esp_err_t err = esp_event_loop_create_default();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create default event loop: %s", esp_err_to_name(err));
+    }
+
+    // Initialise non-volatile storage
+    if (err == ESP_OK) {
+        err = nvs_init();
+    }
+
+    // Initialize networking
+    if (err == ESP_OK) {
+        err = networking_init();
+    }
+
     // Create OTA task
     BaseType_t task_created = pdFAIL;
-    if (init_successful && got_ip) {
+    if (err == ESP_OK) {
         task_created = xTaskCreate(&ota_task, "ota_task", 10240, NULL, 5, NULL);
         if (task_created != pdPASS) {
             ESP_LOGE(TAG, "Failed to create OTA task");
-            init_successful = false;
+            err = ESP_ERR_NO_MEM;
         }
     }
 
     // Clean-up if initialization failed
-    if (!init_successful || !got_ip) {
+    if (err != ESP_OK) {
         ESP_LOGE(TAG, "Initialization failed, system cannot continue, will restart soonish");
         
-        // Clean up resources if needed
-        if (wifi_semaphore != NULL) {
-            vSemaphoreDelete(wifi_semaphore);
+        if (g_sta_netif != NULL) {
+            esp_netif_destroy_default_wifi(g_sta_netif);
+            g_sta_netif = NULL;
         }
-        
-        vTaskDelay(pdMS_TO_TICKS(10000));
+
+        // EXIT
+        task_fatal_error();
     }
     
     // If we reach here, initialization was successful
-    // The OTA task is running, so app_main can return
-    ESP_LOGI(TAG, "app_main initialization complete, OTA task running");
+    ESP_LOGI(TAG, "Network initialization complete, OTA task running");
+
+    // Configure the UART that talks to the stepper motor driver
+    uart_driver_install(UART_NUM_1, UART_RX_BUFFFER_SIZE * 2, 0, 0, NULL, 0);
+    uart_param_config(UART_NUM_1, &g_uart_config);
+    uart_set_pin(UART_NUM_1, CONFIG_STEPPER_UART_TXD_PIN, CONFIG_STEPPER_UART_RXD_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+
+    // Ping the host
+    char hostname_buffer[64];
+    int hostname_length = hostname_from_url(CONFIG_STEPPER_FIRMWARE_UPG_URL, hostname_buffer, sizeof(hostname_buffer));
+    if ((hostname_length > 0) && (hostname_length < sizeof(hostname_buffer))) { 
+        while (err == ESP_OK) {
+            err = ping_start(hostname_buffer);
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "Unable to start pinging host \"%s\"", hostname_buffer);
+            } else {
+                vTaskDelay(pdMS_TO_TICKS(10000));
+            }
+        }
+    } else {
+        ESP_LOGE(TAG, "Unable to find hostname in \"%s\" (or fit it in buffer of size %d).",
+                    CONFIG_STEPPER_FIRMWARE_UPG_URL, sizeof(hostname_buffer));
+    }
 }
 
 // End of file
