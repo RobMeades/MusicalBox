@@ -137,9 +137,11 @@ esp_err_t tmc2209_read_lines(int32_t address);
  *
  * @param address    the address of the device, range 0 to 3.
  * @param resolution the power of 2 value that the microstep
- *                   resolution should be set, from 1
- *                   to 256; if not a power of two
- *                   the value is rounded down.
+ *                   resolution should be set, from 1 (i.e.
+ *                   one step is one step of the motor)
+ *                   to 256 (so it would take 256 steps to move
+ *                   the motor by one step); if not a power
+ *                   of two the value is rounded down.
  * @return           the power of two set, else negative
  *                   error code from esp_err_t.
  */
@@ -164,16 +166,15 @@ esp_err_t tmc2209_get_microstep_resolution(int32_t address);
  * motor from its own internal step generator, i.e. it
  * WILL START MOVING IMMEDIATELY.
  *
- * @param address               the address of the device,
- *                              range 0 to 3.
- * @param microsteps_per_second the velocity to set in
- *                              microsteps per second.
- * @return                      the velociy set, else
- *                              negative error code
- *                              from esp_err_t.
+ * @param address    the address of the device, range 0 to 3.
+ * @param milliHertz the step rate in millihertz, i.e.
+ *                   a value of 1000 would be one step per
+ *                   second.
+ * @return           the velociy set, else negative error
+ *                   code from esp_err_t.
  */
 esp_err_t tmc2209_set_velocity(int32_t address,
-                               int32_t microsteps_per_second);
+                               int32_t milliHertz);
 
 #ifdef __cplusplus
 }

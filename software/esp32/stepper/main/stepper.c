@@ -113,8 +113,8 @@ void app_main(void)
             err = ESP_OK;
         }
 
-        ESP_LOGI(TAG, "Setting TMC2209 %d to half step.", TMC2209_ADDRESS);
-        err = tmc2209_set_microstep_resolution(TMC2209_ADDRESS, 2);
+        ESP_LOGI(TAG, "Setting TMC2209 %d to full step.", TMC2209_ADDRESS);
+        err = tmc2209_set_microstep_resolution(TMC2209_ADDRESS, 1);
         if (err >= 0) {
             ESP_LOGI(TAG, "Microstep resolution is now %d.", err);
             err = ESP_OK;
@@ -133,15 +133,16 @@ void app_main(void)
             err = ESP_OK;
         }
         ESP_LOGI(TAG, "Setting velocity.");
-        err = tmc2209_set_velocity(TMC2209_ADDRESS, 800);
+        err = tmc2209_set_velocity(TMC2209_ADDRESS, (1000 * 64) * 4);
         if (err >= 0) {
             ESP_LOGI(TAG, "Velocity is now %d.", err);
             err = ESP_OK;
         }
 
         if (err == ESP_OK) {
-            ESP_LOGI(TAG, "Waiting a bit....");
-            vTaskDelay(pdMS_TO_TICKS(1000));
+            ESP_LOGI(TAG, "Waiting for one revolution of the 24BYJ48-034"
+                     " stepper motor (at full step resolution)...");
+            vTaskDelay(pdMS_TO_TICKS((1000 * 32) / 4));
         }
 
         ESP_LOGI(TAG, "Stopping.");

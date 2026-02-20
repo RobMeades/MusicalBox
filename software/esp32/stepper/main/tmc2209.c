@@ -44,6 +44,11 @@
 // The contents of the sync and reserved fields of a datagram
 #define DATAGRAM_SYNC_AND_RESERVED 0x05
 
+// From the table in section 14 of the TMC2209 datasheet,
+// the number to multiply VACTUAL by to get a step frequency
+// in milliHertz
+#define VACTUAL_TO_MILLIHERTZ 715
+
 /* ----------------------------------------------------------------
  * TYPES
  * -------------------------------------------------------------- */
@@ -418,12 +423,13 @@ esp_err_t tmc2209_get_microstep_resolution(int32_t address)
 // Set the velocity of the stepper motor attached to a
 // TMC2209 device.
 esp_err_t tmc2209_set_velocity(int32_t address,
-                               int32_t microsteps_per_second)
+                               int32_t milliHertz)
 {
     // Write to the VACTUAL register (0x22)
-    esp_err_t err = write(address, 0x22, (uint32_t *) &microsteps_per_second); 
-    if (err == sizeof(microsteps_per_second)) {
-        err = microsteps_per_second;
+    milliHertz /= VACTUAL_TO_MILLIHERTZ;
+    esp_err_t err = write(address, 0x22, (uint32_t *) &milliHertz); 
+    if (err == sizeof(milliHertz)) {
+        err = milliHertz;
     }
 
     return err;
