@@ -33,6 +33,9 @@
  * COMPILE-TIME MACROS
  * -------------------------------------------------------------- */
 
+ // Logging prefix
+ #define TAG "ping"
+
 /* ----------------------------------------------------------------
  * TYPES
  * -------------------------------------------------------------- */
@@ -40,8 +43,6 @@
 /* ----------------------------------------------------------------
  * VARIABLES
  * -------------------------------------------------------------- */
-
-static const char *TAG = "ping";
 
 /* ----------------------------------------------------------------
  * STATIC FUNCTIONS
@@ -59,7 +60,7 @@ static void cmd_ping_on_ping_success(esp_ping_handle_t hdl, void *args)
     esp_ping_get_profile(hdl, ESP_PING_PROF_IPADDR, &target_addr, sizeof(target_addr));
     esp_ping_get_profile(hdl, ESP_PING_PROF_SIZE, &recv_len, sizeof(recv_len));
     esp_ping_get_profile(hdl, ESP_PING_PROF_TIMEGAP, &elapsed_time, sizeof(elapsed_time));
-    ESP_LOGI(TAG, "%" PRIu32 " bytes from %s icmp_seq=%" PRIu16 " ttl=%" PRIu16 " time=%" PRIu32 " ms",
+    ESP_LOGI(TAG, "%" PRIu32 " byte(s) from %s icmp_seq=%" PRIu16 " ttl=%" PRIu16 " time=%" PRIu32 " ms.",
         recv_len, ipaddr_ntoa((ip_addr_t*)&target_addr), seqno, ttl, elapsed_time);
 }
 
@@ -70,7 +71,7 @@ static void cmd_ping_on_ping_timeout(esp_ping_handle_t hdl, void *args)
     ip_addr_t target_addr;
     esp_ping_get_profile(hdl, ESP_PING_PROF_SEQNO, &seqno, sizeof(seqno));
     esp_ping_get_profile(hdl, ESP_PING_PROF_IPADDR, &target_addr, sizeof(target_addr));
-    ESP_LOGI(TAG, "From %s icmp_seq=%d timeout",ipaddr_ntoa((ip_addr_t*)&target_addr), seqno);
+    ESP_LOGI(TAG, "From %s icmp_seq=%d timeout.",ipaddr_ntoa((ip_addr_t*)&target_addr), seqno);
 }
 
 // Call back to ping session called at end.
@@ -92,7 +93,7 @@ static void cmd_ping_on_ping_end(esp_ping_handle_t hdl, void *args)
     } else {
         loss = 0;
     }
-    ESP_LOGI(TAG, "%" PRIu32 " packets transmitted, %" PRIu32 " received, %" PRIu32 "%% packet loss, average time %" PRIu32 " ms",
+    ESP_LOGI(TAG, "%" PRIu32 " packets transmitted, %" PRIu32 " received, %" PRIu32 "%% packet loss, average time %" PRIu32 " ms.",
                   transmitted, received, loss, total_time_ms / received);
     // delete the ping sessions, so that we clean up all resources and can create a new ping session
     // we don't have to call delete function in the callback, instead we can call delete function from other tasks
@@ -117,7 +118,7 @@ esp_err_t ping_start(const char *hostname)
     memset(&target_addr, 0, sizeof(target_addr));
 
     if (getaddrinfo(hostname, NULL, &hint, &res) != 0) {
-        ESP_LOGI(TAG, "Unknown host: %s", hostname);
+        ESP_LOGI(TAG, "Unknown host: \"%s\".", hostname);
     } else {
         if (res->ai_family == AF_INET) {
             struct in_addr addr4 = ((struct sockaddr_in *) (res->ai_addr))->sin_addr;
@@ -134,11 +135,11 @@ esp_err_t ping_start(const char *hostname)
         esp_ping_handle_t ping;
         err = esp_ping_new_session(&config, &cbs, &ping);
         if (err != ESP_OK) {
-            ESP_LOGW(TAG, "Failed to initialise ping session");
+            ESP_LOGW(TAG, "Failed to initialise ping session.");
         } else {
             err = esp_ping_start(ping);
             if (err != ESP_OK) {
-                ESP_LOGW(TAG, "Failed to start ping to \"%s\"", hostname);
+                ESP_LOGW(TAG, "Failed to start ping to \"%s\".", hostname);
             }
         }
     }

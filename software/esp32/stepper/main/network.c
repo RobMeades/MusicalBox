@@ -35,6 +35,9 @@
  * COMPILE-TIME MACROS
  * -------------------------------------------------------------- */
 
+ // Logging prefix
+ #define TAG "network"
+
 /* ----------------------------------------------------------------
  * TYPES
  * -------------------------------------------------------------- */
@@ -42,8 +45,6 @@
 /* ----------------------------------------------------------------
  * VARIABLES
  * -------------------------------------------------------------- */
-
-static const char *TAG = "network";
 
 // Semaphore for WiFi synchronization
 static SemaphoreHandle_t g_wifi_semaphore = NULL;
@@ -62,23 +63,23 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         ESP_LOGI(TAG, "WiFi started, connecting...");
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED) {
-        ESP_LOGI(TAG, "WiFi connected to AP");
+        ESP_LOGI(TAG, "WiFi connected to AP.");
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         wifi_event_sta_disconnected_t *event = (wifi_event_sta_disconnected_t*) event_data;
-        ESP_LOGI(TAG, "WiFi disconnected, reason: %d", event->reason);
+        ESP_LOGI(TAG, "WiFi disconnected, reason: %d.", event->reason);
         
         // Print the AP info that failed
-        ESP_LOGI(TAG, "AP SSID: %.32s", event->ssid);
-        ESP_LOGI(TAG, "AP BSSID: %02x:%02x:%02x:%02x:%02x:%02x",
+        ESP_LOGI(TAG, "AP SSID: %.32s.", event->ssid);
+        ESP_LOGI(TAG, "AP BSSID: %02x:%02x:%02x:%02x:%02x:%02x.",
                 event->bssid[0], event->bssid[1], event->bssid[2],
                 event->bssid[3], event->bssid[4], event->bssid[5]);
-        ESP_LOGI(TAG, "Reason: %d", event->reason);
+        ESP_LOGI(TAG, "Reason: %d.", event->reason);
 
         ESP_LOGI(TAG, "Attempting to reconnect...");
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_AUTHMODE_CHANGE) {
         wifi_event_sta_authmode_change_t *event = (wifi_event_sta_authmode_change_t*) event_data;
-        ESP_LOGI(TAG, "Authmode changed from %d to %d", 
+        ESP_LOGI(TAG, "Authmode changed from %d to %d.", 
                  event->old_mode, event->new_mode);
     }
 }
@@ -88,7 +89,7 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base,
 {
     if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *) event_data;
-        ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
+        ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip), ".");
         
         SemaphoreHandle_t semaphore = (SemaphoreHandle_t) arg;
         if (semaphore != NULL) {
@@ -97,15 +98,16 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base,
     }
 }
 
-/* ----------------------------------------------------------------
- * STATIC FUNCTIONS
+/* ----------------------------------------- // Logging prefix
+ #define TAG = "ota";
+
+-----------------------
+ * PUBLIC FUNCTIONS
  * -------------------------------------------------------------- */
 
-// Initialise networking: on exit g_sta_netif will be non-NULL,
-// as will g_wifi_semaphore; requires the default event loop to
-// have been created.
-static esp_err_t init(const char *ssid, const char *password,
-                      wifi_auth_mode_t auth_mode)
+// Initialise networking.
+esp_err_t network_init(const char *ssid, const char *password,
+                       wifi_auth_mode_t auth_mode)
 {
     esp_err_t err = ESP_ERR_INVALID_ARG;
     wifi_config_t wifi_config = {0};
@@ -121,14 +123,14 @@ static esp_err_t init(const char *ssid, const char *password,
         // Initialize network interface
         err = esp_netif_init();
         if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to initialize network interface: %s", esp_err_to_name(err));
+            ESP_LOGE(TAG, "Failed to initialize network interface: %s.", esp_err_to_name(err));
         }
 
         // Create semaphore for WiFi synchronization
         if (err == ESP_OK && g_wifi_semaphore == NULL) {
             g_wifi_semaphore = xSemaphoreCreateBinary();
             if (g_wifi_semaphore == NULL) {
-                ESP_LOGE(TAG, "Failed to create WiFi semaphore");
+                ESP_LOGE(TAG, "Failed to create WiFi semaphore.");
                 err = ESP_ERR_NO_MEM;
             }
         }
@@ -137,7 +139,7 @@ static esp_err_t init(const char *ssid, const char *password,
         if (err == ESP_OK) {
             g_sta_netif = esp_netif_create_default_wifi_sta();
             if (g_sta_netif == NULL) {
-                ESP_LOGE(TAG, "Failed to create default WiFi station");
+                ESP_LOGE(TAG, "Failed to create default WiFi station.");
                 err = ESP_ERR_NO_MEM;
             }
         }
@@ -147,7 +149,7 @@ static esp_err_t init(const char *ssid, const char *password,
             wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
             err = esp_wifi_init(&cfg);
             if (err != ESP_OK) {
-                ESP_LOGE(TAG, "Failed to initialize WiFi: %s", esp_err_to_name(err));
+                ESP_LOGE(TAG, "Failed to initialize WiFi: %s.", esp_err_to_name(err));
             }
         }
 
@@ -156,14 +158,14 @@ static esp_err_t init(const char *ssid, const char *password,
             err = esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, 
                                             &wifi_event_handler, NULL);
             if (err != ESP_OK) {
-                ESP_LOGE(TAG, "Failed to register WiFi event handler: %s", esp_err_to_name(err));
+                ESP_LOGE(TAG, "Failed to register WiFi event handler: %s.", esp_err_to_name(err));
             }
         }
         if (err == ESP_OK) {
             err = esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, 
                                             &ip_event_handler, g_wifi_semaphore);
             if (err != ESP_OK) {
-                ESP_LOGE(TAG, "Failed to register IP event handler: %s", esp_err_to_name(err));
+                ESP_LOGE(TAG, "Failed to register IP event handler: %s.", esp_err_to_name(err));
             }
         }
 
@@ -171,7 +173,7 @@ static esp_err_t init(const char *ssid, const char *password,
         if (err == ESP_OK) {
             err = esp_wifi_set_mode(WIFI_MODE_STA);
             if (err != ESP_OK) {
-                ESP_LOGE(TAG, "Failed to set WiFi mode: %s", esp_err_to_name(err));
+                ESP_LOGE(TAG, "Failed to set WiFi mode: %s.", esp_err_to_name(err));
             }
         }
 
@@ -187,7 +189,7 @@ static esp_err_t init(const char *ssid, const char *password,
 
             err = esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
             if (err != ESP_OK) {
-                ESP_LOGE(TAG, "Failed to set WiFi configuration: %s", esp_err_to_name(err));
+                ESP_LOGE(TAG, "Failed to set WiFi configuration: %s.", esp_err_to_name(err));
             }
         }
 
@@ -195,7 +197,7 @@ static esp_err_t init(const char *ssid, const char *password,
         if (err == ESP_OK) {
             err = esp_wifi_start();
             if (err != ESP_OK) {
-                ESP_LOGE(TAG, "Failed to start WiFi: %s", esp_err_to_name(err));
+                ESP_LOGE(TAG, "Failed to start WiFi: %s.", esp_err_to_name(err));
             } else {
                 ESP_LOGI(TAG, "WiFi connecting to %s...", CONFIG_STEPPER_WIFI_SSID);
             }
@@ -204,9 +206,9 @@ static esp_err_t init(const char *ssid, const char *password,
         // Wait for IP address (with timeout)
         if (err == ESP_OK) {
             if (xSemaphoreTake(g_wifi_semaphore, pdMS_TO_TICKS(60000)) == pdTRUE) {
-                ESP_LOGI(TAG, "WiFi connected, IP obtained");
+                ESP_LOGI(TAG, "WiFi connected, IP obtained.");
             } else {
-                ESP_LOGE(TAG, "Failed to obtain IP address within timeout");
+                ESP_LOGE(TAG, "Failed to obtain IP address within timeout.");
                 err = ESP_ERR_TIMEOUT;
             }
         }
@@ -215,7 +217,7 @@ static esp_err_t init(const char *ssid, const char *password,
         if (err == ESP_OK) {
             esp_err_t ps_err = esp_wifi_set_ps(WIFI_PS_NONE);
             if (ps_err != ESP_OK) {
-                ESP_LOGW(TAG, "Failed to disable WiFi power save: %s", esp_err_to_name(ps_err));
+                ESP_LOGW(TAG, "Failed to disable WiFi power save: %s.", esp_err_to_name(ps_err));
                 // Continue anyway, this is not fatal
             }
         }
@@ -232,17 +234,6 @@ static esp_err_t init(const char *ssid, const char *password,
 
     // Returns ESP_OK or negative error code from esp_err_t
     return -err;
-}
-
-/* ----------------------------------------------------------------
- * PUBLIC FUNCTIONS
- * -------------------------------------------------------------- */
-
-// Initialise networking.
-esp_err_t network_init(const char *ssid, const char *password,
-                       wifi_auth_mode_t auth_mode)
-{
-    return init(ssid, password, auth_mode);
 }
 
 // Deinitialise networking.

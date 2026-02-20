@@ -25,14 +25,19 @@
 #include "driver/gpio.h"
 #include "errno.h"
 #include "driver/uart.h"
+#include "esp_task_wdt.h"
 
 #include "ota.h"
 #include "network.h"
+#include "tmc2209.h"
 #include "ping.h"
 
 /* ----------------------------------------------------------------
  * COMPILE-TIME MACROS
  * -------------------------------------------------------------- */
+
+ // Logging prefix
+ #define TAG "stepper"
 
 // UART buffer
 #define UART_RX_BUFFFER_SIZE 256
@@ -44,33 +49,10 @@
 /* ----------------------------------------------------------------
  * VARIABLES
  * -------------------------------------------------------------- */
-
-static const char *TAG = "stepper";
-
-// UART configuration
-static const uart_config_t g_uart_config = {
-    .baud_rate = CONFIG_STEPPER_UART_BAUD_RATE,
-    .data_bits = UART_DATA_8_BITS,
-    .parity = UART_PARITY_DISABLE,
-    .stop_bits = UART_STOP_BITS_1,
-    .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-    .source_clk = UART_SCLK_DEFAULT,
-};
  
 /* ----------------------------------------------------------------
  * STATIC FUNCTIONS
  * -------------------------------------------------------------- */
-
-static void __attribute__((noreturn)) task_fatal_error()
-{
-    ESP_LOGE(TAG, "Exiting task due to fatal error...");
-    vTaskDelete(NULL);
-
-    vTaskDelay(pdMS_TO_TICKS(5000));
-    esp_restart();
-
-    while(1) {}
-}
 
 /* ----------------------------------------------------------------
  * PUBLIC FUNCTIONS
@@ -84,7 +66,7 @@ void app_main(void)
     // Create the default event loop, for everyone's use
     esp_err_t err = esp_event_loop_create_default();
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to create default event loop: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "Failed to create default event loop: %s.", esp_err_to_name(err));
     }
 
     // Initialise OTA
@@ -102,37 +84,55 @@ void app_main(void)
         err = ota_update(CONFIG_STEPPER_FIRMWARE_UPG_URL, CONFIG_STEPPER_OTA_RECV_TIMEOUT_MS);
     }
 
-    // Clean-up if initialization failed
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Initialization failed, system cannot continue, will restart soonish");
-        network_deinit();
-        // EXIT
-        task_fatal_error();
-    }
-    
-    // If we reach here, initialization was successful
-    ESP_LOGI(TAG, "Network initialization complete, OTA task running");
-
-    // Configure the UART that talks to the stepper motor driver
-    uart_driver_install(UART_NUM_1, UART_RX_BUFFFER_SIZE * 2, 0, 0, NULL, 0);
-    uart_param_config(UART_NUM_1, &g_uart_config);
-    uart_set_pin(UART_NUM_1, CONFIG_STEPPER_UART_TXD_PIN, CONFIG_STEPPER_UART_RXD_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-
-    // Ping the host
-    char hostname_buffer[64];
-    int hostname_length = network_hostname_from_url(CONFIG_STEPPER_FIRMWARE_UPG_URL, hostname_buffer, sizeof(hostname_buffer));
-    if ((hostname_length > 0) && (hostname_length < sizeof(hostname_buffer))) { 
-        while (err == ESP_OK) {
-            err = ping_start(hostname_buffer);
-            if (err != ESP_OK) {
-                ESP_LOGE(TAG, "Unable to start pinging host \"%s\"", hostname_buffer);
-            } else {
-                vTaskDelay(pdMS_TO_TICKS(10000));
-            }
+    // Initialize the TMC2209 stepper motor driver interface
+    if (err == ESP_OK) {
+        err = tmc2209_init(CONFIG_STEPPER_UART_NUM, CONFIG_STEPPER_UART_TXD_PIN,
+                           CONFIG_STEPPER_UART_RXD_PIN, CONFIG_STEPPER_UART_BAUD_RATE);
+        if (err == ESP_OK) {
+            tmc2209_start(0);
         }
+    }
+
+    if (err == ESP_OK) {    
+        ESP_LOGI(TAG, "Initialization complete.");
+
+        uint32_t stepper_data = 0;
+        ESP_LOGI(TAG, "Read data from device register.");
+        if (tmc2209_read(0, 0, &stepper_data) == sizeof(stepper_data)) {
+            ESP_LOGI(TAG, "Got back 0x%08x.", stepper_data);
+        } else {
+            ESP_LOGE(TAG, "Read failed.");
+        }
+        esp_task_wdt_add(NULL);
+        while(1) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            esp_task_wdt_reset();
+        }
+        esp_task_wdt_delete(NULL);
+#if 0
+        // Ping the host
+        char hostname_buffer[64];
+        int hostname_length = network_hostname_from_url(CONFIG_STEPPER_FIRMWARE_UPG_URL, hostname_buffer, sizeof(hostname_buffer));
+        if ((hostname_length > 0) && (hostname_length < sizeof(hostname_buffer))) { 
+            while (err == ESP_OK) {
+                err = ping_start(hostname_buffer);
+                if (err != ESP_OK) {
+                    ESP_LOGE(}TAG, "Unable to start pinging host \"%s\".", hostname_buffer);
+                } else {
+                    vTaskDelay(pdMS_TO_TICKS(10000));
+                }
+            }
+        } else {
+            ESP_LOGE(TAG, "Unable to find hostname in \"%s\" (or fit it in buffer of size %d).",
+                     CONFIG_STEPPER_FIRMWARE_UPG_URL, sizeof(hostname_buffer));
+        }
+#endif
     } else {
-        ESP_LOGE(TAG, "Unable to find hostname in \"%s\" (or fit it in buffer of size %d).",
-                    CONFIG_STEPPER_FIRMWARE_UPG_URL, sizeof(hostname_buffer));
+        ESP_LOGE(TAG, "Initialization failed, system cannot continue, will restart soonish.");
+        tmc2209_deinit();
+        network_deinit();
+        vTaskDelay(pdMS_TO_TICKS(5000));
+        esp_restart();
     }
 }
 

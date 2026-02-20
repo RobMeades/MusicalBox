@@ -1,4 +1,4 @@
-menu "Stepper Configuration"
+menu "Application Configuration"
 
     config STEPPER_WIFI_SSID
         string "WiFi SSID"
@@ -7,7 +7,7 @@ menu "Stepper Configuration"
             SSID (network name) for the example to connect to.
 
     config STEPPER_WIFI_PASSWORD
-        string "WiFi Password"
+        string "Wi-Fi Password"
         default ""
         help
             WiFi password (WPA or WPA2) for the example to use.
@@ -31,21 +31,27 @@ menu "Stepper Configuration"
         help
             Maximum time for reception
 
+    config STEPPER_UART_NUM
+        int "UART_NUM"
+        default 1
+        help
+            UART number to use for the stepper motor driver
+
     config STEPPER_UART_TXD_PIN
         int "TXD pin"
-        default 21
+        default 8
         help
             UART TX pin wired to the stepper motor driver
 
     config STEPPER_UART_RXD_PIN
         int "RXD pin"
-        default 10
+        default 7
         help
             UART RX pin wired to the stepper motor driver
 
     config STEPPER_UART_BAUD_RATE
         int "UART baud rate"
-        default 9600
+        default 115200
         help
             Baud rate on the UART talking to the stepper motor driver
 
