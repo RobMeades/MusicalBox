@@ -55,6 +55,11 @@
 // The UART we are using, -1 if not set.
 static int32_t g_uart = -1;
 
+// Table of permitted microstep values: order is important, the index
+// into the array corresponds to the MRES value in the CHOPCONF
+// register i.e. 256 is an MRES value of 0, 1 is an MRES value of 8.
+static const int32_t g_microstep_table[] = {256, 128, 64, 32, 16, 8, 4, 2, 1};
+
 /* ----------------------------------------------------------------
  * STATIC FUNCTIONS
  * -------------------------------------------------------------- */
@@ -149,6 +154,7 @@ static esp_err_t write(int32_t address, int32_t reg, uint32_t *data)
         index++;
         *(p + index) = address;
         index++;
+        *(p + index) = reg;
         if (data != NULL) {
             *(p + index) = reg | 0x80; // Set top bit if there is data to write
         }
@@ -240,6 +246,23 @@ static esp_err_t read(int32_t address, int32_t reg, uint32_t *data)
     return err;
 }
 
+// Do a generic register read.
+static esp_err_t read_reg(int32_t address, int32_t reg)
+{
+    uint32_t data = 0;
+
+    esp_err_t err = read(address, reg, &data);
+    if (err == sizeof(data)) {
+        err = (esp_err_t) data;
+    } else {
+        if (err > 0) {
+            err = ESP_ERR_INVALID_RESPONSE;
+        }
+    }
+
+    return err;
+}
+
 /* ----------------------------------------------------------------
  * PUBLIC FUNCTIONS
  * -------------------------------------------------------------- */
@@ -310,17 +333,101 @@ void tmc2209_deinit()
 
 // Write a buffer of data to the given register of the TMC2209 at
 // the given address.
- esp_err_t tmc2209_write(int32_t address, int32_t reg, uint32_t data)
- {
+esp_err_t tmc2209_write(int32_t address, int32_t reg, uint32_t data)
+{
     return write(address, reg, &data);
- }
+}
 
- // Read a buffer of data from the given register of the TMC2209
- // at the given address
- esp_err_t tmc2209_read(int32_t address, int32_t reg, uint32_t *data)
- {
+// Read a buffer of data from the given register of the TMC2209
+// at the given address
+esp_err_t tmc2209_read(int32_t address, int32_t reg, uint32_t *data)
+{
     return read(address, reg, data);
- }
+}
+
+// Read the state of all of a TMC2209's lines.
+esp_err_t tmc2209_read_lines(int32_t address)
+{
+    // Read the IOIN register (0x06)
+    return read_reg(address, 0x06);
+}
+
+// Read the microstep counter of a TMC2209.
+esp_err_t tmc2209_get_position(int32_t address)
+{
+    // Read the MSCNT register (0x6a)
+    return read_reg(address, 0x6a);
+}
+
+// Set the microstep resolution of a TMC2209.
+ esp_err_t tmc2209_set_microstep_resolution(int32_t address, int32_t resolution)
+ {
+    esp_err_t err = ESP_ERR_INVALID_ARG;
+    int32_t index;
+
+    // Find the entry in g_microstep_table which is less than or
+    // equal to microsteps
+    for (index = 0;
+         (index < sizeof(g_microstep_table) / sizeof(g_microstep_table[0])) &&
+         (g_microstep_table[index] > resolution);
+         index++) {
+    }
+
+    if (index < sizeof(g_microstep_table) / sizeof(g_microstep_table[0])) {
+        // index is now the value to write to the MRES value in the
+        // CHOPCONF register (0x6c).  Since there are other things in
+        // there we need to do a read-modify-write
+        err = read_reg(address, 0x6c);
+        if (err >= 0) {
+            uint32_t data = err;
+            // The MRES value is in bits 24 to 27
+            data &= 0xf0ffffff;
+            data |= ((uint32_t) index) << 24;
+            // Write it back again
+            err = write(address, 0x6c, &data); 
+            if (err == sizeof(data)) {
+                // Return the value set
+                err = g_microstep_table[index];
+            }
+        }
+    }
+
+    return err;
+}
+
+// Get the microstep resolution of a TMC2209.
+esp_err_t tmc2209_get_microstep_resolution(int32_t address)
+{
+    // Read the CHOPCONF register (0x6c).
+    esp_err_t err = read_reg(address, 0x6c);
+    if (err >= 0) {
+        uint32_t data = err;
+        err = ESP_ERR_INVALID_RESPONSE;
+        // The MRES value is in bits 24 to 27
+        data = (data >> 24) & 0x0f;
+        // Use this as an index into g_microstep_table
+        // to get the power-of-two value 
+        if (data < sizeof(g_microstep_table) / sizeof(g_microstep_table[0])) {
+            err = g_microstep_table[data];
+        }
+    }
+
+    return err;
+}
+
+// Set the velocity of the stepper motor attached to a
+// TMC2209 device.
+esp_err_t tmc2209_set_velocity(int32_t address,
+                               int32_t microsteps_per_second)
+{
+    // Write to the VACTUAL register (0x22)
+    esp_err_t err = write(address, 0x22, (uint32_t *) &microsteps_per_second); 
+    if (err == sizeof(microsteps_per_second)) {
+        err = microsteps_per_second;
+    }
+
+    return err;
+}
 
 // End of file
 

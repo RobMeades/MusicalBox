@@ -45,6 +45,19 @@
  */
 #define TMC2209_REG_GCONF_DEFAULTS 0x000001c0
 
+
+/** Masks for the line states of each pin of a TMC2209, 
+ * use on the return value of tmc2209_read_lines().
+ */
+#define TMC2209_LINE_MASK_ENN       0x0001
+#define TMC2209_LINE_MASK_MS1       0x0004
+#define TMC2209_LINE_MASK_MS2       0x0008
+#define TMC2209_LINE_MASK_DIAG      0x0010
+#define TMC2209_LINE_MASK_PDN_UART  0x0040
+#define TMC2209_LINE_MASK_STEP      0x0080
+#define TMC2209_LINE_MASK_SPREAD_EN 0x0100
+#define TMC2209_LINE_MASK_DIR       0x0200
+
 /* ----------------------------------------------------------------
  * TYPES
  * -------------------------------------------------------------- */
@@ -61,7 +74,6 @@
  * @param pin_txd  the GPIO number for the transmit data pin, e.g. 21.
  * @param pin_rxd  the GPIO number for the receive data pin, e.g. 10.
  * @param baud     the baud rate to use, e.g. 115200.
- *
  * @return         ESP_OK on success, else a negative value from esp_err_t.
  */
 esp_err_t tmc2209_init(int32_t uart, int32_t pin_txd, int32_t pin_rxd,
@@ -70,7 +82,7 @@ esp_err_t tmc2209_init(int32_t uart, int32_t pin_txd, int32_t pin_rxd,
 /** Start communications with a particular TMC2209.
  *
  * @param address the address of the device, range 0 to 3.
- * @return         ESP_OK on success, else a negative value from esp_err_t.
+ * @return        ESP_OK on success, else a negative value from esp_err_t.
  */
 esp_err_t tmc2209_start(int32_t address);
 
@@ -84,7 +96,6 @@ void tmc2209_deinit();
  * @param address the address of the device, range 0 to 3.
  * @param reg     the register to write to, range 0 to 127.
  * @param data    the data to send.
- *
  * @return        the number of data bytes sent or negative error
  *                code from esp_err_t.
  */
@@ -97,13 +108,74 @@ esp_err_t tmc2209_write(int32_t address, int32_t reg, uint32_t data);
  * @param reg     the register to write to, range 0 to 127.
  * @param data    a pointer to a uint32_t into which the received
  *                data will be written; may be NULL.
- *
  * @return        the number of bytes written to data or
  *                negative error code from esp_err_t.
  */
- esp_err_t tmc2209_read(int32_t address, int32_t reg, uint32_t *data);
+esp_err_t tmc2209_read(int32_t address, int32_t reg, uint32_t *data);
 
- #ifdef __cplusplus
+/** Read the state of all of a TMC2209's lines.  The return
+ * value, if non-negative, may be masked with one or more
+ * TMC2209_LINE_MASK_* values (see above) to get the state
+ * of a given line.  The top byte of the response contains the
+ * version number of the IC (normally 0x21).
+ *
+ * @param address the address of the device, range 0 to 3.
+ * @return        the lines state as a bit-map, else negative
+ *                error code from esp_err_t.
+ */
+esp_err_t tmc2209_read_lines(int32_t address);
+
+/** Read the microstep counter of a TMC2209.
+ *
+ * @param address the address of the device, range 0 to 3.
+ * @return        the count, else negative error code
+ *                from esp_err_t.
+ */
+ esp_err_t tmc2209_get_position(int32_t address);
+
+/** Set the microstep resolution of a TMC2209.
+ *
+ * @param address    the address of the device, range 0 to 3.
+ * @param resolution the power of 2 value that the microstep
+ *                   resolution should be set, from 1
+ *                   to 256; if not a power of two
+ *                   the value is rounded down.
+ * @return           the power of two set, else negative
+ *                   error code from esp_err_t.
+ */
+ esp_err_t tmc2209_set_microstep_resolution(int32_t address, int32_t resolution);
+
+/** Get the microstep resolution of the stepper motor
+ * attached to a TMC2209 device.
+ *
+ * @param address               the address of the device,
+ *                              range 0 to 3.
+ * @return                      the microstep resolution,
+ *                              else negative error code
+ *                              from esp_err_t.
+ */
+esp_err_t tmc2209_get_microstep_resolution(int32_t address);
+
+
+/** Set the velocity of the stepper motor attached to a
+ * TMC2209 device.
+ *
+ * IMPORTANT: this will drive the steps of the stepper
+ * motor from its own internal step generator, i.e. it
+ * WILL START MOVING IMMEDIATELY.
+ *
+ * @param address               the address of the device,
+ *                              range 0 to 3.
+ * @param microsteps_per_second the velocity to set in
+ *                              microsteps per second.
+ * @return                      the velociy set, else
+ *                              negative error code
+ *                              from esp_err_t.
+ */
+esp_err_t tmc2209_set_velocity(int32_t address,
+                               int32_t microsteps_per_second);
+
+#ifdef __cplusplus
 }
 #endif
 

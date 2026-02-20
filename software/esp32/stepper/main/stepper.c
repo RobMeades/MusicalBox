@@ -42,6 +42,9 @@
 // UART buffer
 #define UART_RX_BUFFFER_SIZE 256
 
+// The addresss of the TMC2209 device we are going to us
+#define TMC2209_ADDRESS 0
+
 /* ----------------------------------------------------------------
  * TYPES
  * -------------------------------------------------------------- */
@@ -89,7 +92,7 @@ void app_main(void)
         err = tmc2209_init(CONFIG_STEPPER_UART_NUM, CONFIG_STEPPER_UART_TXD_PIN,
                            CONFIG_STEPPER_UART_RXD_PIN, CONFIG_STEPPER_UART_BAUD_RATE);
         if (err == ESP_OK) {
-            tmc2209_start(0);
+            tmc2209_start(TMC2209_ADDRESS);
         }
     }
 
@@ -97,12 +100,58 @@ void app_main(void)
         ESP_LOGI(TAG, "Initialization complete.");
 
         uint32_t stepper_data = 0;
-        ESP_LOGI(TAG, "Read data from device register.");
-        if (tmc2209_read(0, 0, &stepper_data) == sizeof(stepper_data)) {
+        ESP_LOGI(TAG, "Read data from TMC2209 %d.", TMC2209_ADDRESS);
+        if (tmc2209_read(TMC2209_ADDRESS, 0, &stepper_data) == sizeof(stepper_data)) {
             ESP_LOGI(TAG, "Got back 0x%08x.", stepper_data);
         } else {
             ESP_LOGE(TAG, "Read failed.");
         }
+        ESP_LOGI(TAG, "Read line state of TMC2209 %d.", TMC2209_ADDRESS);
+        err = tmc2209_read_lines(TMC2209_ADDRESS);
+        if (err >= 0) {
+            ESP_LOGI(TAG, "Lines are 0x%04x.", err);
+            err = ESP_OK;
+        }
+
+        ESP_LOGI(TAG, "Setting TMC2209 %d to half step.", TMC2209_ADDRESS);
+        err = tmc2209_set_microstep_resolution(TMC2209_ADDRESS, 2);
+        if (err >= 0) {
+            ESP_LOGI(TAG, "Microstep resolution is now %d.", err);
+            err = ESP_OK;
+        }
+        ESP_LOGI(TAG, "Getting TMC2209 %d microstep resolution.", TMC2209_ADDRESS);
+        err = tmc2209_get_microstep_resolution(TMC2209_ADDRESS);
+        if (err >= 0) {
+            ESP_LOGI(TAG, "Microstep resolution read-back is %d.", err);
+            err = ESP_OK;
+        }
+
+        ESP_LOGI(TAG, "Rotate TMC2209 %d a little.", TMC2209_ADDRESS);
+        err = tmc2209_get_position(TMC2209_ADDRESS);
+        if (err >= 0) {
+            ESP_LOGI(TAG, "Starting microsteps reading is %d.", err);
+            err = ESP_OK;
+        }
+        ESP_LOGI(TAG, "Setting velocity.");
+        err = tmc2209_set_velocity(TMC2209_ADDRESS, 800);
+        if (err >= 0) {
+            ESP_LOGI(TAG, "Velocity is now %d.", err);
+            err = ESP_OK;
+        }
+
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "Waiting a bit....");
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+
+        ESP_LOGI(TAG, "Stopping.");
+        tmc2209_set_velocity(TMC2209_ADDRESS, 0);
+        err = tmc2209_get_position(TMC2209_ADDRESS);
+        if (err >= 0) {
+            ESP_LOGI(TAG, "Microsteps reading is now %d.", err);
+            err = ESP_OK;
+        }
+
         esp_task_wdt_add(NULL);
         while(1) {
             vTaskDelay(pdMS_TO_TICKS(1000));
