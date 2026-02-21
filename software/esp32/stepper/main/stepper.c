@@ -284,7 +284,7 @@ void app_main(void)
                     // Flash the debug LED as a keep-alive
                     flash_debug_led(DEBUG_LED_LONG_MS);
                 }
-                err = ping_start(hostname_buffer, ping_loss_cb, NULL);
+                err = ping_start(hostname_buffer, 100, 100, -1, 1000, ping_loss_cb, NULL);
                 if (err != ESP_OK) {
                     ESP_LOGE(TAG, "Unable to start pinging host \"%s\".", hostname_buffer);
                 } else {

@@ -45,6 +45,18 @@ typedef void (*ping_loss_cb_t)(void *arg);
  * background and diagnostic prints will be emitted.
  *
  * @param hostname         the host name, a null-terminated string.
+ * @param count            the number of pings to send; set a
+ *                         negative value to use the default (5),
+ *                         0 to ping forever.
+ * @param interval_ms      the interval between pings in milliseconds;
+ *                         set a negative value to use the default
+ *                         of 1 second.
+ * @param timeout_ms       the time to wait for a response in
+ *                         milliseconds; set a negative value to
+ *                         use the default of 1 second.
+ * @param data_size        the number of bytes of data to send in
+ *                         each ping; set a negative value to use
+ *                         the default of 64.
  * @param ping_loss_cb     function to call on the loss of a ping;
  *                         may be NULL.
  * @param ping_loss_cb_arg user argument that will be passed to
@@ -53,8 +65,11 @@ typedef void (*ping_loss_cb_t)(void *arg);
  * @return                 ESP_OK on successful start, else a
  *                         negative value from esp_err_t.
  */
-esp_err_t ping_start(const char *hostname,
-                     ping_loss_cb_t ping_loss_cb, void *ping_loss_cb_arg);
+esp_err_t ping_start(const char *hostname, int32_t count,
+                     int32_t interval_ms, int32_t timeout_ms,
+                     int32_t data_size,
+                     ping_loss_cb_t ping_loss_cb,
+                     void *ping_loss_cb_arg);
 
  #ifdef __cplusplus
  }

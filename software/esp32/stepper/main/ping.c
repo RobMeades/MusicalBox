@@ -116,7 +116,9 @@ static void cmd_ping_on_ping_end(esp_ping_handle_t hdl, void *args)
  * -------------------------------------------------------------- */
 
 // Ping the given host name, which should be a null-terminated string.
-esp_err_t ping_start(const char *hostname,
+esp_err_t ping_start(const char *hostname, int32_t count,
+                     int32_t interval_ms, int32_t timeout_ms,
+                     int32_t data_size,
                      ping_loss_cb_t ping_loss_cb,
                      void *ping_loss_cb_arg)
 {
@@ -138,6 +140,18 @@ esp_err_t ping_start(const char *hostname,
             inet_addr_to_ip4addr(ip_2_ip4(&target_addr), &addr4);
         }
         config.target_addr = target_addr;
+        if (count >= 0) {
+            config.count = count;
+        }
+        if (interval_ms >= 0) {
+            config.interval_ms = interval_ms;
+        }
+        if (timeout_ms >= 0) {
+            config.timeout_ms = timeout_ms;
+        }
+        if (data_size >= 0) {
+            config.data_size = data_size;
+        }
         /* set callback functions */
         esp_ping_callbacks_t cbs = {
             .cb_args = NULL,
