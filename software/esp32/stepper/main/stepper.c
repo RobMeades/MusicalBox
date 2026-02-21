@@ -21,6 +21,9 @@
 #include <string.h>
 #include <inttypes.h>
 #include "esp_event.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h"
 #include "esp_log.h"
 #include "driver/gpio.h"
 #include "errno.h"
@@ -52,10 +55,41 @@
 /* ----------------------------------------------------------------
  * VARIABLES
  * -------------------------------------------------------------- */
- 
+
+// A place to remember the handle of the stall task if created.
+static TaskHandle_t g_stall_task_handle = NULL;
+
+// A semaphore to let diag_interrupt_handler signal the stall task
+static SemaphoreHandle_t g_diag_semaphore = NULL;
+
 /* ----------------------------------------------------------------
  * STATIC FUNCTIONS
  * -------------------------------------------------------------- */
+
+#if defined CONFIG_STEPPER_DIAG_PIN && (CONFIG_STEPPER_DIAG_PIN >= 0)
+
+// DIAG interrupt handler,
+static void diag_interrupt_handler(void *handler_arg)
+{
+    (void) handler_arg;
+    BaseType_t higherPriorityTaskWoken;
+
+    if (g_stall_task_handle && g_diag_semaphore) {
+        xSemaphoreGiveFromISR(g_diag_semaphore, &higherPriorityTaskWoken);
+        portYIELD_FROM_ISR(higherPriorityTaskWoken);
+    }
+}
+
+#endif
+
+// Task to handle stall indications.
+static void stall_task(void *arg)
+{
+    while (1) {
+        xSemaphoreTake(g_diag_semaphore, portMAX_DELAY);
+        ESP_LOGI(TAG, "STALL");
+    }
+}
 
 /* ----------------------------------------------------------------
  * PUBLIC FUNCTIONS
@@ -96,6 +130,24 @@ void app_main(void)
         }
     }
 
+    // Create the RTOS stuff needed for stall handling
+    if (err == ESP_OK) {
+        vSemaphoreCreateBinary(g_diag_semaphore);
+        if (!g_diag_semaphore ||
+            (xTaskCreate(&stall_task, "stall_task", 1024 * 4, NULL, 5, &g_stall_task_handle) != pdPASS)) {
+            err = ESP_ERR_NO_MEM;
+            ESP_LOGE(TAG, "Unable to create stall_task or semaphore.");
+        }
+#if defined CONFIG_STEPPER_DIAG_PIN && (CONFIG_STEPPER_DIAG_PIN >= 0)
+        // Initial setup of stall detection with threshold value that means
+        // a stall should never be detected
+        if (err == ESP_OK) {
+            tmc2209_init_stallguard(TMC2209_ADDRESS, -1, 0, CONFIG_STEPPER_DIAG_PIN,
+                                    diag_interrupt_handler, NULL);
+        }
+#endif
+    }
+
     if (err == ESP_OK) {    
         ESP_LOGI(TAG, "Initialization complete.");
 
@@ -113,6 +165,9 @@ void app_main(void)
             err = ESP_OK;
         }
 
+        ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));
+        ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
+
         ESP_LOGI(TAG, "Setting TMC2209 %d to full step.", TMC2209_ADDRESS);
         err = tmc2209_set_microstep_resolution(TMC2209_ADDRESS, 1);
         if (err >= 0) {
@@ -126,6 +181,11 @@ void app_main(void)
             err = ESP_OK;
         }
 
+#if defined CONFIG_STEPPER_DIAG_PIN && (CONFIG_STEPPER_DIAG_PIN >= 0)
+        if (err == ESP_OK) {
+            tmc2209_set_stallguard(TMC2209_ADDRESS, -1, 100);
+        }
+#endif
         ESP_LOGI(TAG, "Rotate TMC2209 %d a little.", TMC2209_ADDRESS);
         err = tmc2209_get_position(TMC2209_ADDRESS);
         if (err >= 0) {
@@ -139,10 +199,16 @@ void app_main(void)
             err = ESP_OK;
         }
 
+        ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));
+        ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
+
         if (err == ESP_OK) {
             ESP_LOGI(TAG, "Waiting for one revolution of the 24BYJ48-034"
                      " stepper motor (at full step resolution)...");
-            vTaskDelay(pdMS_TO_TICKS((1000 * 32) / 4));
+            for (size_t x = 0; x < 10; x++) {
+                vTaskDelay(pdMS_TO_TICKS((1000 * 32) / 4 / 10));
+                ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
+            }
         }
 
         ESP_LOGI(TAG, "Stopping.");
@@ -153,6 +219,10 @@ void app_main(void)
             err = ESP_OK;
         }
 
+        ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));
+        ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
+
+        ESP_LOGI(TAG, "DONE with motor stuff");
         esp_task_wdt_add(NULL);
         while(1) {
             vTaskDelay(pdMS_TO_TICKS(1000));
@@ -179,6 +249,17 @@ void app_main(void)
 #endif
     } else {
         ESP_LOGE(TAG, "Initialization failed, system cannot continue, will restart soonish.");
+#if defined CONFIG_STEPPER_DIAG_PIN && (CONFIG_STEPPER_DIAG_PIN >= 0)
+        tmc2209_deinit_stallguard(CONFIG_STEPPER_DIAG_PIN);
+#endif
+        if (g_stall_task_handle) {
+            vTaskDelete(g_stall_task_handle);
+            g_stall_task_handle = NULL;
+        }
+        if (g_diag_semaphore) {
+            vSemaphoreDelete(g_diag_semaphore);
+            g_diag_semaphore = NULL;
+        }
         tmc2209_deinit();
         network_deinit();
         vTaskDelay(pdMS_TO_TICKS(5000));

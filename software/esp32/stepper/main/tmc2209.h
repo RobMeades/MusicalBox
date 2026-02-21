@@ -61,7 +61,7 @@
 /* ----------------------------------------------------------------
  * TYPES
  * -------------------------------------------------------------- */
-  
+
 /* ----------------------------------------------------------------
  * FUNCTIONS
  * -------------------------------------------------------------- */
@@ -87,6 +87,11 @@ esp_err_t tmc2209_init(int32_t uart, int32_t pin_txd, int32_t pin_rxd,
 esp_err_t tmc2209_start(int32_t address);
 
  /** Deinitialise the interface to the TMC2209.
+ *
+ * Note: if you have setup an interrupt handler by calling
+ * tmc2209_init_stallguard() it is up to you to call
+ * tmc2209_deinit_stallguard() to remove it, this function will
+ * not do so.
  */
 void tmc2209_deinit();
 
@@ -150,14 +155,11 @@ esp_err_t tmc2209_read_lines(int32_t address);
 /** Get the microstep resolution of the stepper motor
  * attached to a TMC2209 device.
  *
- * @param address               the address of the device,
- *                              range 0 to 3.
- * @return                      the microstep resolution,
- *                              else negative error code
- *                              from esp_err_t.
+ * @param address the address of the device, range 0 to 3.
+ * @return        the microstep resolution, else negative
+ *                error code from esp_err_t.
  */
 esp_err_t tmc2209_get_microstep_resolution(int32_t address);
-
 
 /** Set the velocity of the stepper motor attached to a
  * TMC2209 device.
@@ -175,6 +177,120 @@ esp_err_t tmc2209_get_microstep_resolution(int32_t address);
  */
 esp_err_t tmc2209_set_velocity(int32_t address,
                                int32_t milliHertz);
+
+/** Get the value of TSTEP from a TMC2209 device; this
+ * value may be required when setting stallguard
+ * operation with tmc2209_set_stallguard().
+ *
+ * @param address the address of the device, range 0 to 3.
+ * @return        the TSTEP value, else negative error code
+ *                from esp_err_t.
+ */
+esp_err_t tmc2209_get_tstep(int32_t address);
+
+/** Get the SG_RESULT value from a TMC2209 device; this
+ * value may be required when setting stallguard
+ * operation with tmc2209_set_stallguard().  Lower
+ * values mean that there is a higher load.
+ *
+ * @param address the address of the device, range 0 to 3.
+ * @return        the SG_RESULT value, else negative error code
+ *                from esp_err_t.
+ */
+esp_err_t tmc2209_get_sg_result(int32_t address);
+
+/** Set the operation of StallGuard in a TMC2209.
+ * This allows the detection of a stall condition which
+ * will pulse the DIAG pin of the TMC2209 that may be
+ * connected to a pin of this microcontroller and cause
+ * an interrupt. See sections 5.3 and 11.2 of the TMC2209
+ * data sheet for how to derive the TCOOLTHRS and SGTHRS
+ * values but basically TCOOLTHRS has to be at least
+ * as large as TSTEP for StallGuard to be employed and
+ * a stall occurs when SG_RESULT is less than twice SGTHRS.
+ *
+ * Note: the value of TSTEP, which is relevant because
+ * TCOOLTHRS is compared with it, changes with velocity,
+ * therefore you should call tmc2209_set_stallguard()
+ * if the velocity is changed.
+ *
+ * Note: if you set an interrupt handler, make sure to call
+ * tmc2209_deinit_stallguard() when done, otherwise your
+ * interrupt handler may be called at any time.
+ *
+ * Note: this will make sure that gpio_install_isr_service()
+ * is installed.
+ *
+ * @param address     the address of the device, range 0 to 3.
+ * @param tcoolthrs   the value of TCOOLTHRS to set in the
+ *                    TMC2209.  Use a negative value to have
+ *                    this code set a default value that
+ *                    is the same as the TSTEP value in the
+ *                    chip, meaning that stallguard should
+ *                    always be active.
+ * @param sgthrs      the value of SGTHRS to set in the
+ *                    TMC2209.  Lower values provde a higher
+ *                    load threshold; zero means no stall
+ *                    would ever be detected.
+ * @param pin         the GPIO pin of this microcontroller
+ *                    that the DIAG pin of the TMC2209
+ *                    is connected to; use a negative value
+ *                    if there is no such connection.
+ * @param handler     the interrupt handler to call when
+ *                    pin changes state; must be non-NULL
+ *                    if pin is non-negative.  THIS HANDLER
+ *                    WILL BE CALLED IN INTERRUPT CONTEXT
+ *                    so do very little in it, e.g. queue
+ *                    an event or give a semaphore.
+ * @param handler_arg user-defined argument that will be
+ *                    passed to handler when it is called;
+ *                    may be NULL.
+ * @return            zero on success, else negative error
+ *                    code from esp_err_t.
+ */
+esp_err_t tmc2209_init_stallguard(int32_t address,
+                                  int32_t tcoolthrs,
+                                  uint8_t sgthrs,
+                                  int32_t pin,
+                                  gpio_isr_t handler,
+                                  void *handler_arg);
+
+/** Set the StallGuard registers in a TMC2209.  If you
+ * have connected the DIAG output of the TMC2209 to a
+ * pin of this microcontroller you should call
+ * tmc2209_init_stallguard() first to set up an
+ * interrupt handler.  See that function also for a
+ * more detailed description of the TCOOLTHRS and SGTHRS
+ * parameters.
+ *
+ * @param address     the address of the device, range 0 to 3.
+ * @param tcoolthrs   the value of TCOOLTHRS to set in the
+ *                    TMC2209.  Use a negative value to have
+ *                    this code set a default value that
+ *                    is the same as the TSTEP value in the
+ *                    chip, meaning that stallguard should
+ *                    always be active.
+ * @param sgthrs      the value of SGTHRS to set in the
+ *                    TMC2209.
+ * @return            zero on success, else negative error
+ *                    code from esp_err_t.
+ */
+esp_err_t tmc2209_set_stallguard(int32_t address,
+                                 int32_t tcoolthrs,
+                                 uint8_t sgthrs);
+
+/** Call this to remove the interrupt handling that was
+ * set up by tmc2209_init_stallguard().  After this function
+ * has returned your interrupt handler will no longer be
+ * called.  There is no need to call this if you did not
+ * pass a GPIO pin to tmc2209_init_stallguard().
+ *
+ * Note: this will not uninstall gpio_install_isr_service().
+ *
+ * @param pin     the GPIO pin that was passed to
+ *                tmc2209_init_stallguard().
+ */
+void tmc2209_deinit_stallguard(int32_t pin);
 
 #ifdef __cplusplus
 }

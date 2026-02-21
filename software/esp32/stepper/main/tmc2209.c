@@ -27,6 +27,7 @@
 #include "esp_log.h"
 #include "errno.h"
 #include "driver/uart.h"
+#include "driver/gpio.h"
 #include "string.h"
 
 #include "tmc2209.h"
@@ -235,7 +236,7 @@ static esp_err_t read(int32_t address, int32_t reg, uint32_t *data)
                     *data = endian_convert(output);
                 }
             } else {
-                err = ESP_ERR_INVALID_CRC;
+                err = -ESP_ERR_INVALID_CRC;
                 ESP_LOGE(TAG, "CRC failure: expected 0x%02x, got 0x%02x).",
                          crc, *(p + sizeof(datagram) - 1));
             }
@@ -251,6 +252,23 @@ static esp_err_t read(int32_t address, int32_t reg, uint32_t *data)
     return err;
 }
 
+// Do a generic register write.
+static esp_err_t write_reg(int32_t address, int32_t reg,
+                           uint32_t data)
+{
+    esp_err_t err = write(address, reg, &data); 
+
+    if (err == sizeof(data)) {
+        err = ESP_OK;
+    } else {
+        if (err >= 0) {
+            err = -ESP_ERR_INVALID_RESPONSE;
+        }
+    }
+
+    return err;
+}
+
 // Do a generic register read.
 static esp_err_t read_reg(int32_t address, int32_t reg)
 {
@@ -260,9 +278,40 @@ static esp_err_t read_reg(int32_t address, int32_t reg)
     if (err == sizeof(data)) {
         err = (esp_err_t) data;
     } else {
-        if (err > 0) {
-            err = ESP_ERR_INVALID_RESPONSE;
+        if (err >= 0) {
+            err = -ESP_ERR_INVALID_RESPONSE;
         }
+    }
+
+    return err;
+}
+
+// Set the stallguard registers.
+static esp_err_t set_stallguard(int32_t address,
+                                int32_t tcoolthrs,
+                                uint8_t sgthrs)
+{
+    esp_err_t err = ESP_OK;
+
+    ESP_LOGI(TAG, "Configuring StallGuard, TCOOLTHRS %d, SGTHRS %d.",
+             tcoolthrs, sgthrs);
+    if (tcoolthrs < 0) {
+        // Read the TSTEP register so that we
+        // can use it as TCOOLTHRS
+        err = read_reg(address, 0x12);
+        if (err >= 0) {
+            tcoolthrs = err;
+            err = ESP_OK;
+            ESP_LOGI(TAG, "TCOOLTHRS will be TSTEP which is %d.", tcoolthrs);
+        }
+    }
+    if (err == ESP_OK) {
+        // Write to the TCOOLTHRS register (0x14) 
+        err = write_reg(address, 0x14, tcoolthrs); 
+    }
+    if (err == ESP_OK) {
+        // Write to the SGTHRS register (0x40) 
+        err = write_reg(address, 0x40, sgthrs); 
     }
 
     return err;
@@ -389,8 +438,8 @@ esp_err_t tmc2209_get_position(int32_t address)
             data &= 0xf0ffffff;
             data |= ((uint32_t) index) << 24;
             // Write it back again
-            err = write(address, 0x6c, &data); 
-            if (err == sizeof(data)) {
+            err = write_reg(address, 0x6c, data); 
+            if (err == ESP_OK) {
                 // Return the value set
                 err = g_microstep_table[index];
             }
@@ -427,12 +476,77 @@ esp_err_t tmc2209_set_velocity(int32_t address,
 {
     // Write to the VACTUAL register (0x22)
     milliHertz /= VACTUAL_TO_MILLIHERTZ;
-    esp_err_t err = write(address, 0x22, (uint32_t *) &milliHertz); 
-    if (err == sizeof(milliHertz)) {
+    esp_err_t err = write_reg(address, 0x22, milliHertz); 
+    if (err == ESP_OK) {
         err = milliHertz;
     }
 
     return err;
+}
+
+// Get the value of TSTEP from a TMC2209.
+esp_err_t tmc2209_get_tstep(int32_t address)
+{
+    // Read the TSTEP register (0x12)
+    return read_reg(address, 0x12);
+}
+
+// Get the value of SG_RESULT from a TMC2209.
+esp_err_t tmc2209_get_sg_result(int32_t address)
+{
+    // Read the SG_RESULT register (0x41)
+    return read_reg(address, 0x41);
+}
+
+// Set the operation of stall-guard in a TMC2209.
+esp_err_t tmc2209_init_stallguard(int32_t address,
+                                  int32_t tcoolthrs,
+                                  uint8_t sgthrs,
+                                  int32_t pin,
+                                  gpio_isr_t handler,
+                                  void *handler_arg)
+{
+    esp_err_t err = -ESP_ERR_INVALID_ARG;
+
+    if ((pin < 0) || (handler != NULL)) {
+        err = set_stallguard(address, tcoolthrs, sgthrs);
+        if ((err == ESP_OK) && (pin >= 0)) {
+            ESP_LOGI(TAG, "Configuring interrupt pin %d.", pin);
+            gpio_config_t cfg = {
+                .intr_type = GPIO_INTR_POSEDGE,
+                .mode = GPIO_MODE_INPUT,
+                .pin_bit_mask = (1ULL << pin),
+                .pull_down_en = GPIO_PULLDOWN_DISABLE,
+                .pull_up_en = GPIO_PULLUP_ENABLE
+            };
+            err = gpio_config(&cfg);
+            if (err == ESP_OK) {
+                err = gpio_install_isr_service(0);
+                // ESP_ERR_INVALID_STATE means the ISR service was already installed
+                if ((err == ESP_OK) || (err == ESP_ERR_INVALID_STATE)) {
+                    err = gpio_isr_handler_add((gpio_num_t) pin,
+                                                handler, handler_arg);
+                }
+            }
+        }
+    }
+    
+    return err;
+}
+
+// Set the stall-guard registers in a TMC2209.
+esp_err_t tmc2209_set_stallguard(int32_t address,
+                                 int32_t tcoolthrs,
+                                 uint8_t sgthrs)
+{
+    return set_stallguard(address, tcoolthrs, sgthrs);;
+}
+
+// Remove interrupt handling that was set up by
+// tmc2209_init_stallguard().
+void tmc2209_deinit_stallguard(int32_t pin)
+{
+    gpio_isr_handler_remove((gpio_num_t) pin);
 }
 
 // End of file
