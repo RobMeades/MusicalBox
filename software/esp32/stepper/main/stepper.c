@@ -25,9 +25,9 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "esp_log.h"
-#include "driver/gpio.h"
 #include "errno.h"
 #include "driver/uart.h"
+#include "driver/gpio.h"
 #include "esp_task_wdt.h"
 
 #include "ota.h"
@@ -48,6 +48,12 @@
 // The addresss of the TMC2209 device we are going to us
 #define TMC2209_ADDRESS 0
 
+// Standard short duration for an LED lash
+#define DEBUG_LED_SHORT_MS 50
+
+// Standard short duration for a long LED lash
+#define DEBUG_LED_LONG_MS 1000
+
 /* ----------------------------------------------------------------
  * TYPES
  * -------------------------------------------------------------- */
@@ -59,12 +65,25 @@
 // A place to remember the handle of the stall task if created.
 static TaskHandle_t g_stall_task_handle = NULL;
 
-// A semaphore to let diag_interrupt_handler signal the stall task
+// A semaphore to let diag_interrupt_handler signal the stall task.
 static SemaphoreHandle_t g_diag_semaphore = NULL;
+
+// Count of the number of ping losses.
+static uint32_t g_pings_lost = 0;
 
 /* ----------------------------------------------------------------
  * STATIC FUNCTIONS
  * -------------------------------------------------------------- */
+
+// Flash the debug LED
+static void flash_debug_led(int32_t duration_ms)
+{
+#if defined (CONFIG_STEPPER_DEBUG_LED_PIN) && (CONFIG_STEPPER_DEBUG_LED_PIN >= 0)
+    gpio_set_level(CONFIG_STEPPER_DEBUG_LED_PIN, 0);
+    vTaskDelay(pdMS_TO_TICKS(duration_ms));
+    gpio_set_level(CONFIG_STEPPER_DEBUG_LED_PIN, 1);
+#endif
+}
 
 #if defined CONFIG_STEPPER_DIAG_PIN && (CONFIG_STEPPER_DIAG_PIN >= 0)
 
@@ -91,6 +110,18 @@ static void stall_task(void *arg)
     }
 }
 
+// Callback function for ping loss
+static void ping_loss_cb(void *arg)
+{
+    (void) arg;
+
+    g_pings_lost++;
+#if defined (CONFIG_STEPPER_DEBUG_LED_PIN) && (CONFIG_STEPPER_DEBUG_LED_PIN >= 0)
+    // Switch on the debug LED forever
+    gpio_set_level(CONFIG_STEPPER_DEBUG_LED_PIN, 0);
+#endif
+}
+
 /* ----------------------------------------------------------------
  * PUBLIC FUNCTIONS
  * -------------------------------------------------------------- */
@@ -105,6 +136,20 @@ void app_main(void)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to create default event loop: %s.", esp_err_to_name(err));
     }
+
+#if defined (CONFIG_STEPPER_DEBUG_LED_PIN) && (CONFIG_STEPPER_DEBUG_LED_PIN >= 0)
+    // Configure our debug LED
+    if (err == ESP_OK) {
+        err = gpio_set_level(CONFIG_STEPPER_DEBUG_LED_PIN, 1);
+        if (err == ESP_OK) {
+            err = gpio_set_direction(CONFIG_STEPPER_DEBUG_LED_PIN, GPIO_MODE_OUTPUT);
+            if (err == ESP_OK) {
+                // Flash it so that we know it can be active
+                flash_debug_led(DEBUG_LED_SHORT_MS);
+            }
+        }
+    }
+#endif
 
     // Initialise OTA
     if (err == ESP_OK) {
@@ -125,9 +170,6 @@ void app_main(void)
     if (err == ESP_OK) {
         err = tmc2209_init(CONFIG_STEPPER_UART_NUM, CONFIG_STEPPER_UART_TXD_PIN,
                            CONFIG_STEPPER_UART_RXD_PIN, CONFIG_STEPPER_UART_BAUD_RATE);
-        if (err == ESP_OK) {
-            tmc2209_start(TMC2209_ADDRESS);
-        }
     }
 
     // Create the RTOS stuff needed for stall handling
@@ -148,8 +190,11 @@ void app_main(void)
 #endif
     }
 
-    if (err == ESP_OK) {    
+    if (err == ESP_OK) {
         ESP_LOGI(TAG, "Initialization complete.");
+
+#if 0
+        tmc2209_start(TMC2209_ADDRESS);
 
         uint32_t stepper_data = 0;
         ESP_LOGI(TAG, "Read data from TMC2209 %d.", TMC2209_ADDRESS);
@@ -229,15 +274,19 @@ void app_main(void)
             esp_task_wdt_reset();
         }
         esp_task_wdt_delete(NULL);
-#if 0
+#else
         // Ping the host
         char hostname_buffer[64];
         int hostname_length = network_hostname_from_url(CONFIG_STEPPER_FIRMWARE_UPG_URL, hostname_buffer, sizeof(hostname_buffer));
         if ((hostname_length > 0) && (hostname_length < sizeof(hostname_buffer))) { 
             while (err == ESP_OK) {
-                err = ping_start(hostname_buffer);
+                if (g_pings_lost == 0) {
+                    // Flash the debug LED as a keep-alive
+                    flash_debug_led(DEBUG_LED_LONG_MS);
+                }
+                err = ping_start(hostname_buffer, ping_loss_cb, NULL);
                 if (err != ESP_OK) {
-                    ESP_LOGE(}TAG, "Unable to start pinging host \"%s\".", hostname_buffer);
+                    ESP_LOGE(TAG, "Unable to start pinging host \"%s\".", hostname_buffer);
                 } else {
                     vTaskDelay(pdMS_TO_TICKS(10000));
                 }

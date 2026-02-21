@@ -44,6 +44,12 @@
  * VARIABLES
  * -------------------------------------------------------------- */
 
+// Place to hook the callback to be called on a ping loss.
+static ping_loss_cb_t g_ping_loss_cb = NULL;
+
+// Place to hook the user parameter to be passed to g_ping_loss_cb.
+static void *g_ping_loss_cb_arg = NULL;
+
 /* ----------------------------------------------------------------
  * STATIC FUNCTIONS
  * -------------------------------------------------------------- */
@@ -72,6 +78,9 @@ static void cmd_ping_on_ping_timeout(esp_ping_handle_t hdl, void *args)
     esp_ping_get_profile(hdl, ESP_PING_PROF_SEQNO, &seqno, sizeof(seqno));
     esp_ping_get_profile(hdl, ESP_PING_PROF_IPADDR, &target_addr, sizeof(target_addr));
     ESP_LOGI(TAG, "From %s icmp_seq=%d timeout.",ipaddr_ntoa((ip_addr_t*)&target_addr), seqno);
+    if (g_ping_loss_cb) {
+        g_ping_loss_cb(g_ping_loss_cb_arg);
+    }
 }
 
 // Call back to ping session called at end.
@@ -98,6 +107,8 @@ static void cmd_ping_on_ping_end(esp_ping_handle_t hdl, void *args)
     // delete the ping sessions, so that we clean up all resources and can create a new ping session
     // we don't have to call delete function in the callback, instead we can call delete function from other tasks
     esp_ping_delete_session(hdl);
+    g_ping_loss_cb = NULL;
+    g_ping_loss_cb_arg = NULL;
 }
 
 /* ----------------------------------------------------------------
@@ -105,7 +116,9 @@ static void cmd_ping_on_ping_end(esp_ping_handle_t hdl, void *args)
  * -------------------------------------------------------------- */
 
 // Ping the given host name, which should be a null-terminated string.
-esp_err_t ping_start(const char *hostname)
+esp_err_t ping_start(const char *hostname,
+                     ping_loss_cb_t ping_loss_cb,
+                     void *ping_loss_cb_arg)
 {
     esp_err_t err = ESP_ERR_INVALID_ARG;
     esp_ping_config_t config = ESP_PING_DEFAULT_CONFIG();
@@ -135,11 +148,16 @@ esp_err_t ping_start(const char *hostname)
         esp_ping_handle_t ping;
         err = esp_ping_new_session(&config, &cbs, &ping);
         if (err != ESP_OK) {
-            ESP_LOGW(TAG, "Failed to initialise ping session.");
+            ESP_LOGE(TAG, "Failed to initialise ping session.");
         } else {
             err = esp_ping_start(ping);
-            if (err != ESP_OK) {
-                ESP_LOGW(TAG, "Failed to start ping to \"%s\".", hostname);
+            if (err == ESP_OK) {
+                // Leave this late so that the entries
+                // are only configured on success.
+                g_ping_loss_cb = ping_loss_cb;
+                g_ping_loss_cb_arg = ping_loss_cb_arg;
+            } else {
+                ESP_LOGE(TAG, "Failed to start ping to \"%s\".", hostname);
             }
         }
     }

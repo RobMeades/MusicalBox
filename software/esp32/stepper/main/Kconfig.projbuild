@@ -37,15 +37,21 @@ menu "Application Configuration"
         help
             UART number to use for the stepper motor driver
 
+    config STEPPER_DEBUG_LED_PIN
+        int "Debug LED pin"
+        default 8
+        help
+            The pin where a Debug LED is connected
+
     config STEPPER_UART_TXD_PIN
         int "TXD pin"
-        default 8
+        default 7
         help
             UART TX pin wired to the stepper motor driver
 
     config STEPPER_UART_RXD_PIN
         int "RXD pin"
-        default 7
+        default 6
         help
             UART RX pin wired to the stepper motor driver
 
@@ -57,8 +63,8 @@ menu "Application Configuration"
 
     config STEPPER_DIAG_PIN
         int "DIAG pin"
-        default 6
+        default 5
         help
-            pin connected to the TMC2209 DIAG pin
+            Pin connected to the TMC2209 DIAG pin
 
 endmenu

@@ -25,27 +25,36 @@
  extern "C" {
  #endif
 
- /* ----------------------------------------------------------------
-  * COMPILE-TIME MACROS
-  * -------------------------------------------------------------- */
- 
- /* ----------------------------------------------------------------
-  * TYPES
-  * -------------------------------------------------------------- */
-  
- /* ----------------------------------------------------------------
-  * FUNCTIONS
-  * -------------------------------------------------------------- */
+/* ----------------------------------------------------------------
+ * COMPILE-TIME MACROS
+ * -------------------------------------------------------------- */
+
+/* ----------------------------------------------------------------
+ * TYPES
+ * -------------------------------------------------------------- */
+
+// Function to call on data loss.
+typedef void (*ping_loss_cb_t)(void *arg);
+
+/* ----------------------------------------------------------------
+ * FUNCTIONS
+ * -------------------------------------------------------------- */
  
 /** Start a ping session, of default type, to the given host name.
  * Networking must have been started.  Pinging will continue in the
  * background and diagnostic prints will be emitted.
  *
- * @param hostname  the host name, a null-terminated string.
- * @return          ESP_OK on successful start, else a negative value
- *                  from esp_err_t.
+ * @param hostname         the host name, a null-terminated string.
+ * @param ping_loss_cb     function to call on the loss of a ping;
+ *                         may be NULL.
+ * @param ping_loss_cb_arg user argument that will be passed to
+ *                         ping_loss_cb() if it is called; may
+ *                         be NULL.
+ * @return                 ESP_OK on successful start, else a
+ *                         negative value from esp_err_t.
  */
-esp_err_t ping_start(const char *hostname);
+esp_err_t ping_start(const char *hostname,
+                     ping_loss_cb_t ping_loss_cb, void *ping_loss_cb_arg);
 
  #ifdef __cplusplus
  }
