@@ -20,14 +20,15 @@
 
 #include <string.h>
 #include <inttypes.h>
-#include "esp_event.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "esp_event.h"
 #include "esp_log.h"
 #include "errno.h"
 #include "driver/uart.h"
 #include "driver/gpio.h"
+#include "esp_timer.h"
 #include "esp_task_wdt.h"
 
 #include "ota.h"
@@ -193,7 +194,7 @@ void app_main(void)
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "Initialization complete.");
 
-#if 0
+#if 1
         tmc2209_start(TMC2209_ADDRESS);
 
         uint32_t stepper_data = 0;
@@ -238,7 +239,7 @@ void app_main(void)
             err = ESP_OK;
         }
         ESP_LOGI(TAG, "Setting velocity.");
-        err = tmc2209_set_velocity(TMC2209_ADDRESS, (1000 * 64) * 4);
+        err = tmc2209_set_velocity(TMC2209_ADDRESS, (1000 * 64 * 4));
         if (err >= 0) {
             ESP_LOGI(TAG, "Velocity is now %d.", err);
             err = ESP_OK;
@@ -250,8 +251,9 @@ void app_main(void)
         if (err == ESP_OK) {
             ESP_LOGI(TAG, "Waiting for one revolution of the 24BYJ48-034"
                      " stepper motor (at full step resolution)...");
-            for (size_t x = 0; x < 10; x++) {
-                vTaskDelay(pdMS_TO_TICKS((1000 * 32) / 4 / 10));
+            size_t sg_result_check_interval = 10;
+            for (size_t x = 0; x < sg_result_check_interval; x++) {
+                vTaskDelay(pdMS_TO_TICKS((1000 * 64) / 4 / sg_result_check_interval));
                 ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
             }
         }
@@ -280,6 +282,8 @@ void app_main(void)
         int hostname_length = network_hostname_from_url(CONFIG_STEPPER_FIRMWARE_UPG_URL, hostname_buffer, sizeof(hostname_buffer));
         if ((hostname_length > 0) && (hostname_length < sizeof(hostname_buffer))) { 
             while (err == ESP_OK) {
+                ESP_LOGI(TAG, "%lld second(s) since reset, %d ping(s) lost.",
+                         esp_timer_get_time() / 1000000, g_pings_lost);
                 if (g_pings_lost == 0) {
                     // Flash the debug LED as a keep-alive
                     flash_debug_led(DEBUG_LED_LONG_MS);
