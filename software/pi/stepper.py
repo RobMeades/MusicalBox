@@ -101,10 +101,10 @@ max_torque_step_list = [(0, 2), (1, 2), (1, 3), (0, 3)]
 half_step_list = [(0, -1), (0, 2), (2, -1), (1, 2), (1, -1), (1, 3), (3, -1), (0, 3)] 
 
 # The 2BYJ48 has close to 64 steps per revolution
-steps_per_revolution = 63.68395
+steps_per_revolution = 64
 
-# The 2BYJ48-034 has a gearing reduction of 64:1
-gearing_reduction = 34
+# The 2BYJ48-034 has a gearing reduction of close to 64:1
+gearing_reduction = 63.68395
 
 # This just for debug prints
 coil_list = ["A1", "A2", "B1", "B2"]
