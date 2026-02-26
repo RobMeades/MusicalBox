@@ -61,6 +61,12 @@ menu "Application Configuration"
         help
             Baud rate on the UART talking to the stepper motor driver
 
+    config STEPPER_ENABLE_PIN
+        int "stepper enable"
+        default 9
+        help
+            Pin connected to the TMC2209 EN pin
+
     config STEPPER_DIAG_PIN
         int "DIAG pin"
         default 5

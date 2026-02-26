@@ -42,6 +42,9 @@
 // UART buffer size
 #define UART_RX_BUFFFER_SIZE 256
 
+// The maximum number of TMC2209's that can be addressed by this API
+#define MAX_NUM_TMC2209 4
+
 // The contents of the sync and reserved fields of a datagram
 #define DATAGRAM_SYNC_AND_RESERVED 0x05
 
@@ -49,6 +52,9 @@
 // the number to multiply VACTUAL by to get a step frequency
 // in milliHertz
 #define VACTUAL_TO_MILLIHERTZ 715
+
+// The maximum value of IRUN or IHOLD, which are 5-bit values.
+#define IRUN_OR_IHOLD_MAX 31
 
 /* ----------------------------------------------------------------
  * TYPES
@@ -58,8 +64,12 @@
  * VARIABLES
  * -------------------------------------------------------------- */
 
-// The UART we are using, -1 if not set.
+// The UART we are using, -1 tmc2209_init() has not been called.
 static int32_t g_uart = -1;
+
+// The GPIOs that are wired to the enable pins of the TMC2209's;
+// may be -1
+static gpio_num_t g_pin_motor_enable[MAX_NUM_TMC2209];
 
 // Table of permitted microstep values: order is important, the index
 // into the array corresponds to the MRES value in the CHOPCONF
@@ -87,6 +97,12 @@ static void cleanup()
     if (g_uart >= 0) {
         uart_driver_delete((uart_port_t) g_uart);
         g_uart = -1;
+    }
+    for (size_t x = 0; x < sizeof(g_pin_motor_enable) / sizeof(g_pin_motor_enable[0]); x++) {
+        if (g_pin_motor_enable[x] >= 0) {
+            gpio_set_level(g_pin_motor_enable[x], 1);
+            g_pin_motor_enable[x] = -1;
+        }
     }
 }
 
@@ -317,6 +333,64 @@ static esp_err_t set_stallguard(int32_t address,
     return err;
 }
 
+// Get the value of VFS in millivolts that we get
+// for a given setting of the VSENSE bit of the
+// CHOP CONF register.
+static uint32_t v_full_scale_millivolts(uint32_t v_sense)
+{
+    // See the bottom of the "Sense resistor voltage levels"
+    // table in the datasheet, the full scale voltage is
+    // halved if vsense is 1
+    return v_sense > 0 ? 180 : 320;
+}
+
+// Return the RMS current in milliAmps for a given i_run, VSENSE
+// bit and r_sense_mohm.
+static uint32_t rms_current_milliamps(uint32_t i_run,
+                                      uint32_t v_sense_bit,
+                                      uint32_t r_sense_mohm)
+{
+    // From section 9 of the data sheet, the RMS current
+    // delivered is:
+    //
+    // ((IRUN + 1)  / 32) * (v_full_scale_millivolts / (r_sense_mohm + 20)) *  (1 / root-2)
+    //
+    // ...where max_microvolts is VSRTL (320 mV) if the
+    // VSENSE bit is set to 0 or VSRTH (180 mV) if the VSENSE
+    // bit is set to 1, the 20 mOhms is for PCB track resistance
+    // and the root-2 is to give the RMS current
+
+    // Do this in uint64_t just in case
+    uint64_t numerator = (uint64_t) (i_run + 1) * v_full_scale_millivolts(v_sense_bit) * 1000000;
+    uint64_t denominator = (uint64_t) (32 * 1414 * (r_sense_mohm + 20));
+
+    return (uint32_t) (numerator / denominator);
+}
+
+// Set the enable pin of a motor.
+static esp_err_t setMotorEnablePin(int32_t address, bool enableNotDisable)
+{
+    esp_err_t err = ESP_ERR_INVALID_ARG;
+
+    if (address < (sizeof(g_pin_motor_enable) / sizeof(g_pin_motor_enable[0]))) {
+        err = ESP_ERR_NOT_FOUND;
+        if (g_pin_motor_enable[address] >= 0) {
+            // Pin is low for enable (true), high for disable (false)
+            err = gpio_set_level(g_pin_motor_enable[address], !enableNotDisable);
+            if (err == ESP_OK) {
+                ESP_LOGI(TAG, "MOTOR %s for address %d, pin %d.",
+                        enableNotDisable ? "ENABLED": "DISABLED", address,
+                        g_pin_motor_enable[address]);
+            }
+        } else {
+                ESP_LOGE(TAG, "Not %sing motor, no motor enable GPIO pin was set.",
+                         enableNotDisable ? "enabl": "disabl");
+        }
+    }
+
+    return err;
+}
+
 /* ----------------------------------------------------------------
  * PUBLIC FUNCTIONS
  * -------------------------------------------------------------- */
@@ -325,37 +399,48 @@ static esp_err_t set_stallguard(int32_t address,
 esp_err_t tmc2209_init(int32_t uart, int32_t pin_txd, int32_t pin_rxd,
                        int32_t baud)
 {
-    // UART configuration
-    uart_config_t uart_config = {
-        // baud_rate is populated below
-        .data_bits = UART_DATA_8_BITS,
-        .parity = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-        .source_clk = UART_SCLK_DEFAULT,
-    };
- 
-    ESP_LOGI(TAG, "Installing TMC2209 driver on UART %d, TXD pin %d,"
-             " RXD pin %d, baud rate %d.", uart, pin_txd, pin_rxd, baud);
-    // Configure the UART that talks to the stepper motor driver
-    esp_err_t err = uart_driver_install(uart, UART_RX_BUFFFER_SIZE * 2, 0, 0, NULL, 0);
-    if (err == ESP_OK) {
-        g_uart = uart;
-        uart_config.baud_rate = baud;
-        err = uart_param_config(uart, &uart_config);
+    esp_err_t err = ESP_OK;
+
+    if (g_uart < 0) {
+        // UART configuration
+        uart_config_t uart_config = {
+            // baud_rate is populated below
+            .data_bits = UART_DATA_8_BITS,
+            .parity = UART_PARITY_DISABLE,
+            .stop_bits = UART_STOP_BITS_1,
+            .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+            .source_clk = UART_SCLK_DEFAULT,
+        };
+    
+        // Assume no enable pins
+        for (size_t x = 0; x < sizeof(g_pin_motor_enable) / sizeof(g_pin_motor_enable[0]); x++) {
+            g_pin_motor_enable[x] = -1;
+        }
+
+        ESP_LOGI(TAG, "Installing TMC2209 driver on UART %d, TXD pin %d,"
+                " RXD pin %d, baud rate %d.", uart, pin_txd, pin_rxd, baud);
+        // Configure the UART that talks to the stepper motor driver
+        err = uart_driver_install(uart, UART_RX_BUFFFER_SIZE * 2, 0, 0, NULL, 0);
         if (err == ESP_OK) {
-            err = uart_set_pin(uart, pin_txd, pin_rxd, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+            g_uart = uart;
+            uart_config.baud_rate = baud;
+            err = uart_param_config(uart, &uart_config);
+            if (err == ESP_OK) {
+                err = uart_set_pin(uart, pin_txd, pin_rxd, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+                if (err != ESP_OK) {
+                    ESP_LOGE(TAG, "uart_set_pin() failed (%s).", esp_err_to_name(err));
+                }
+            } else {
+                ESP_LOGE(TAG, "uart_param_config() failed (%s).", esp_err_to_name(err));
+            }
             if (err != ESP_OK) {
-                ESP_LOGE(TAG, "uart_set_pin() failed (%s).", esp_err_to_name(err));
+                cleanup();
             }
         } else {
-            ESP_LOGE(TAG, "uart_param_config() failed (%s).", esp_err_to_name(err));
-        }
-        if (err != ESP_OK) {
-            cleanup();
+            ESP_LOGE(TAG, "uart_driver_install() failed (%s).", esp_err_to_name(err));
         }
     } else {
-        ESP_LOGE(TAG, "uart_driver_install() failed (%s).", esp_err_to_name(err));
+        ESP_LOGW(TAG, "tmc2209_init() called when already enabled");
     }
 
     // Returns ESP_OK or negative error code from esp_err_t
@@ -363,23 +448,54 @@ esp_err_t tmc2209_init(int32_t uart, int32_t pin_txd, int32_t pin_rxd,
 }
 
 // Start communications with a TMC2209.
-esp_err_t tmc2209_start(int32_t address)
+esp_err_t tmc2209_start(int32_t address, int32_t pin_motor_enable)
 {
     esp_err_t err = ESP_ERR_INVALID_STATE;
 
     if (g_uart >= 0) {
-        ESP_LOGI(TAG, "Starting TMC2209 %d.", address);
-        uint32_t data = TMC2209_REG_GCONF_DEFAULTS;
-        err = write(address, 0, &data);
-        if (err != sizeof(data)) {
-            ESP_LOGE(TAG, "Failed to start TMC2209.");
+        err = ESP_OK;
+        char buffer[32] = "no enable pin";
+        if (pin_motor_enable) {
+            snprintf(buffer, sizeof(buffer), "motor enable on pin %d", (int) pin_motor_enable);
+        }
+        if (pin_motor_enable >= 0) {
+            esp_err_t err = ESP_ERR_INVALID_ARG;
+            if (address < sizeof(g_pin_motor_enable) / sizeof(g_pin_motor_enable[0])) {
+                err = gpio_set_level(pin_motor_enable, 1);
+                if (err == ESP_OK) {
+                    err = gpio_set_direction(pin_motor_enable, GPIO_MODE_OUTPUT);
+                    if (err == ESP_OK) {
+                        // Save the motor enable pin for tmc2209_motor_enable()
+                        g_pin_motor_enable[address] = (gpio_num_t) pin_motor_enable;
+                    }
+                }
+            }
+        }
+        ESP_LOGI(TAG, "Starting TMC2209 %d%, s.", address, buffer);
+        if (err == ESP_OK) {
+            err = write_reg(address, 0, TMC2209_REG_GCONF_DEFAULTS);
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to start TMC2209.");
+            }
         }
     }
 
     return err;
 }
  
- // Deinitialise the TMC2209 driver.
+// Set the motor enable pin low to enable motors.
+esp_err_t  tmc2209_motor_enable(int32_t address)
+{
+    return setMotorEnablePin(address, true);
+}
+
+// Set the motor enable pin high to disable motors.
+esp_err_t  tmc2209_motor_disable(int32_t address)
+{
+    return setMotorEnablePin(address, false);
+}
+
+// Deinitialise the TMC2209 driver.
 void tmc2209_deinit()
 {
     cleanup();
@@ -469,6 +585,88 @@ esp_err_t tmc2209_get_microstep_resolution(int32_t address)
     return err;
 }
 
+// Set the current supplied to the stepper motor.
+esp_err_t tmc2209_set_current(int32_t address,
+                              uint32_t r_sense_mohm, 
+                              uint32_t run_current_ma,
+                              uint32_t hold_current_percent)
+{
+    esp_err_t err = -ESP_ERR_INVALID_ARG;
+
+    if (hold_current_percent <= 100) {
+        // Can we achieve the desired current with VSENSE = 1
+        // which halves the power dissipated through the sense
+        // resistors?  Try it with the maximum value of IRUN
+        uint32_t v_sense = 1;
+        uint32_t max_current = rms_current_milliamps(IRUN_OR_IHOLD_MAX,
+                                                     v_sense, r_sense_mohm);
+        if (max_current < run_current_ma) {
+            // Nope
+            v_sense = 0;
+            max_current = rms_current_milliamps(IRUN_OR_IHOLD_MAX,
+                                                v_sense, r_sense_mohm);
+        }
+
+        // -1 because the values in the register are from 0
+        uint32_t i_run = (run_current_ma * IRUN_OR_IHOLD_MAX / max_current) - 1;
+        uint32_t i_hold = i_run * hold_current_percent / 100;
+
+        ESP_LOGI(TAG, "VSENSE will be %u, IRUN %d, IHOLD %d.",
+                 v_sense, i_run, i_hold);
+
+        uint32_t data;
+        // Set VSENSE: read the chopper configuration register (0x6c)
+        err = read_reg(address, 0x6c);
+        if (err >= 0) {
+            // VSENSE choice is in bit 17
+            data = (uint32_t) err;
+            data = (data & 0xfffdffff) | (v_sense << 17);
+            err = write_reg(address, 0x6c, data);
+        }
+
+        if (err >= 0) {
+            // Set IRUN and IHOLD
+            err = read_reg(address, 0x10);
+            // IHOLD is the first 5 bits, IRUN bit 8 to 12
+            if (err >= 0) {
+                data = (uint32_t) err;
+                data = (data & 0xffffe0e0) | (i_hold & 0x1f) | ((i_run & 0x1f) << 8);
+                err = write_reg(address, 0x10, data);
+            }
+        }
+
+        if (err >= 0) {
+            // Finally, set i_scale_analog in the global configuration
+            // register to 0 to use the values
+            err = read_reg(address, 0);
+            if (err >= 0) {
+                // Set bit 0, I_scale_analog, to 0
+                err =  write_reg(address, 0, err & 0xfffffffe); 
+            }
+        }
+
+        if (err >= 0) {
+            // Re-calculate the current to return
+            err = (int32_t) rms_current_milliamps(i_run, v_sense, r_sense_mohm);
+        }
+    }
+
+    return err;
+}
+
+// Return to using VRef to determine the drive current.
+esp_err_t tmc2209_unset_current(int32_t address)
+{
+   // Read the general configuration register
+    esp_err_t err = read_reg(address, 0);
+    if (err >= 0) {
+        // Set bit 0, I_scale_analog, to 1
+        err =  write_reg(address, 0, err | 0x01); 
+    }
+
+    return err;
+}
+
 // Set the velocity of the stepper motor attached to a
 // TMC2209 device.
 esp_err_t tmc2209_set_velocity(int32_t address,
@@ -476,12 +674,7 @@ esp_err_t tmc2209_set_velocity(int32_t address,
 {
     // Write to the VACTUAL register (0x22)
     milliHertz /= VACTUAL_TO_MILLIHERTZ;
-    esp_err_t err = write_reg(address, 0x22, milliHertz); 
-    if (err == ESP_OK) {
-        err = milliHertz;
-    }
-
-    return err;
+    return write_reg(address, 0x22, milliHertz); 
 }
 
 // Get the value of TSTEP from a TMC2209.

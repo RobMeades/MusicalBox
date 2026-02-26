@@ -34,7 +34,7 @@
  * (register 0, 10 bits wide) by tmc2209_start().  The important
  * bits are:
  *
- * bit 0: i_scale_analog = 0 to use internal voltage reference.
+ * bit 0: i_scale_analog = 1 to use external voltage reference.
  * bit 6: pdn_disable = 1 so that the PDN function is not on the
  *        UART pin.
  * bit 7: mstep_reg_select = so that microstep resolution is set by
@@ -43,7 +43,7 @@
  *
  * The rest will be set to 0.
  */
-#define TMC2209_REG_GCONF_DEFAULTS 0x000001c0
+#define TMC2209_REG_GCONF_DEFAULTS 0x000001c1
 
 
 /** Masks for the line states of each pin of a TMC2209, 
@@ -70,23 +70,30 @@
  * still needs to be called before the TMC2209 will respond to
  * read or write requests.
  *
- * @param uart     the UART number to use (e.g. UART_NUM_1).
- * @param pin_txd  the GPIO number for the transmit data pin, e.g. 21.
- * @param pin_rxd  the GPIO number for the receive data pin, e.g. 10.
- * @param baud     the baud rate to use, e.g. 115200.
- * @return         ESP_OK on success, else a negative value from esp_err_t.
+ * @param uart              the UART number to use (e.g. UART_NUM_1).
+ * @param pin_txd           the GPIO number for the transmit data pin, e.g. 21.
+ * @param pin_rxd           the GPIO number for the receive data pin, e.g. 10.
+ * @param baud              the baud rate to use, e.g. 115200.
+ * @return                  ESP_OK on success, else a negative value
+ *                          from esp_err_t.
  */
 esp_err_t tmc2209_init(int32_t uart, int32_t pin_txd, int32_t pin_rxd,
                        int32_t baud);
 
-/** Start communications with a particular TMC2209.
+/** Start communications with a particular TMC2209.  Note that if a
+ * pin_motor_enable is provided to this function it will be held high
+ * (i.e. motor is off) and tmc2209_motor_enable() must be called
+ * to enable the motor.
  *
- * @param address the address of the device, range 0 to 3.
- * @return        ESP_OK on success, else a negative value from esp_err_t.
+ * @param address          the address of the device, range 0 to 3.
+ * @param pin_motor_enable GPIO pin connected to the EN pin of a TMC2209
+ *                         that must be pulled low to enable the motor;
+ *                         use -1 if there is no such pin. 
+ * @return                 ESP_OK on success, else a negative value from esp_err_t.
  */
-esp_err_t tmc2209_start(int32_t address);
+esp_err_t tmc2209_start(int32_t address, int32_t pin_motor_enable);
 
- /** Deinitialise the interface to the TMC2209.
+/** Deinitialise the interface to the TMC2209.
  *
  * Note: if you have setup an interrupt handler by calling
  * tmc2209_init_stallguard() it is up to you to call
@@ -94,6 +101,23 @@ esp_err_t tmc2209_start(int32_t address);
  * not do so.
  */
 void tmc2209_deinit();
+
+/** Enable the motor of a TMC2209; only needs to be called if
+ * a pin_motor_enable was provided to tmc2209_start().
+ *
+ * @param address the address of the device, range 0 to 3.
+ * @return        zero on success else negative error code
+ *                from esp_err_t.
+ */
+esp_err_t tmc2209_motor_enable(int32_t address);
+
+/** Disable the motor of a TMC2209.
+ *
+ * @param address the address of the device, range 0 to 3.
+ * @return        zero on success else negative error code
+ *                from esp_err_t.
+ */
+esp_err_t tmc2209_motor_disable(int32_t address);
 
 /** Write a buffer of data to the given register of the TMC2209 at
  * the given address.
@@ -161,18 +185,62 @@ esp_err_t tmc2209_read_lines(int32_t address);
  */
 esp_err_t tmc2209_get_microstep_resolution(int32_t address);
 
+/** Set the current supplied to the stepper motor by a
+ * TMC2209 device.
+ *
+ * Note: once you have called this function the TMC2209
+ * will use an internal voltage reference when deciding
+ * the drive current, rather than VRef, therefore any
+ * resistor divider or potentiometer connected to VRef
+ * will be ignored.  If you want to go back to using
+ * the VRef input, call tmc2209_unset_current();
+ *
+ * @param address              the address of the device,
+ *                             range 0 to 3.
+ * @param r_sense_mohm         the value of the sense
+ *                             resistors connected to
+ *                             the BRA and BRB pins of
+ *                             the TMC2209 in milliOhms.
+ * @param run_current_ma       the desired current in
+ *                             milliAmps
+ * @param hold_current_percent the hold current as a
+ *                             percentage of the run
+ *                             current; 50% is a good
+ *                             value
+ * @return                     the run current set in
+ *                             milliAmps, else negative
+ *                             error code from esp_err_t.
+ */
+esp_err_t tmc2209_set_current(int32_t address,
+                              uint32_t r_sense_mohm, 
+                              uint32_t run_current_ma,
+                              uint32_t hold_current_percent);
+
+/** Return to using the VRef input pin of the TMC2209
+ * to determine the drive current.  See also
+ * tmc_set_current()
+ *
+ * @param address      the address of the device, range
+ *                     0 to 3.
+ * @return             zero on success, else negative error
+ *                     code from esp_err_t.
+ *
+ */
+esp_err_t tmc2209_unset_current(int32_t address);
+
 /** Set the velocity of the stepper motor attached to a
  * TMC2209 device.
  *
- * IMPORTANT: this will drive the steps of the stepper
- * motor from its own internal step generator, i.e. it
- * WILL START MOVING IMMEDIATELY.
+ * IMPORTANT: if tmc2209_motor_enable() has been called
+ * this will drive the steps of the stepper motor from
+ * its own internal step generator, i.e. it WILL START
+ * MOVING IMMEDIATELY.
  *
  * @param address    the address of the device, range 0 to 3.
  * @param milliHertz the step rate in millihertz, i.e.
  *                   a value of 1000 would be one step per
  *                   second.
- * @return           the velociy set, else negative error
+ * @return           zero on success else negative error
  *                   code from esp_err_t.
  */
 esp_err_t tmc2209_set_velocity(int32_t address,

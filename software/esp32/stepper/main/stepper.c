@@ -49,6 +49,17 @@
 // The addresss of the TMC2209 device we are going to us
 #define TMC2209_ADDRESS 0
 
+// The sense resisitor wired to the BRA and BRB pins of the TMC2209,
+// the BigTreeTech board uses 100 milliOhms
+#define TMC2209_RSENSE_MOHM 110
+
+// The desired stepper motor run current in milliamps
+#define STEPPER_MOTOR_CURRENT_MA 500
+
+// The percentage of the run current to apply during hold;
+// don't need a lot, let it cool down
+#define STEPPER_MOTOR_HOLD_CURRENT_PERCENT 20
+
 // Standard short duration for an LED lash
 #define DEBUG_LED_SHORT_MS 50
 
@@ -185,7 +196,7 @@ void app_main(void)
         // Initial setup of stall detection with threshold value that means
         // a stall should never be detected
         if (err == ESP_OK) {
-            tmc2209_init_stallguard(TMC2209_ADDRESS, -1, 0, CONFIG_STEPPER_DIAG_PIN,
+            tmc2209_init_stallguard(TMC2209_ADDRESS, -1, 100, CONFIG_STEPPER_DIAG_PIN,
                                     diag_interrupt_handler, NULL);
         }
 #endif
@@ -195,7 +206,7 @@ void app_main(void)
         ESP_LOGI(TAG, "Initialization complete.");
 
 #if 1
-        tmc2209_start(TMC2209_ADDRESS);
+        tmc2209_start(TMC2209_ADDRESS, CONFIG_STEPPER_ENABLE_PIN);
 
         uint32_t stepper_data = 0;
         ESP_LOGI(TAG, "Read data from TMC2209 %d.", TMC2209_ADDRESS);
@@ -204,70 +215,95 @@ void app_main(void)
         } else {
             ESP_LOGE(TAG, "Read failed.");
         }
-        ESP_LOGI(TAG, "Read line state of TMC2209 %d.", TMC2209_ADDRESS);
-        err = tmc2209_read_lines(TMC2209_ADDRESS);
-        if (err >= 0) {
-            ESP_LOGI(TAG, "Lines are 0x%04x.", err);
-            err = ESP_OK;
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "Read line state of TMC2209 %d.", TMC2209_ADDRESS);
+            err = tmc2209_read_lines(TMC2209_ADDRESS);
+            if (err >= 0) {
+                ESP_LOGI(TAG, "Lines are 0x%04x.", err);
+                err = ESP_OK;
+            }
         }
 
         ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));
         ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
 
-        ESP_LOGI(TAG, "Setting TMC2209 %d to full step.", TMC2209_ADDRESS);
-        err = tmc2209_set_microstep_resolution(TMC2209_ADDRESS, 1);
-        if (err >= 0) {
-            ESP_LOGI(TAG, "Microstep resolution is now %d.", err);
-            err = ESP_OK;
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "Setting TMC2209 %d to full step.", TMC2209_ADDRESS);
+            err = tmc2209_set_microstep_resolution(TMC2209_ADDRESS, 1);
+            if (err >= 0) {
+                ESP_LOGI(TAG, "Microstep resolution is now %d.", err);
+                err = ESP_OK;
+            }
         }
-        ESP_LOGI(TAG, "Getting TMC2209 %d microstep resolution.", TMC2209_ADDRESS);
-        err = tmc2209_get_microstep_resolution(TMC2209_ADDRESS);
-        if (err >= 0) {
-            ESP_LOGI(TAG, "Microstep resolution read-back is %d.", err);
-            err = ESP_OK;
+
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "Getting TMC2209 %d microstep resolution.", TMC2209_ADDRESS);
+            err = tmc2209_get_microstep_resolution(TMC2209_ADDRESS);
+            if (err >= 0) {
+                ESP_LOGI(TAG, "Microstep resolution read-back is %d.", err);
+                err = ESP_OK;
+            }
+        }
+
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "Setting motor current to %d mA.", STEPPER_MOTOR_CURRENT_MA);
+            err = tmc2209_set_current(TMC2209_ADDRESS, TMC2209_RSENSE_MOHM,
+                                      STEPPER_MOTOR_CURRENT_MA,
+                                      STEPPER_MOTOR_HOLD_CURRENT_PERCENT);
+            if (err >= 0) {
+                ESP_LOGI(TAG, "Current set to %d mA.", err);
+                err = ESP_OK;
+            }
         }
 
 #if defined CONFIG_STEPPER_DIAG_PIN && (CONFIG_STEPPER_DIAG_PIN >= 0)
         if (err == ESP_OK) {
-            tmc2209_set_stallguard(TMC2209_ADDRESS, -1, 100);
+            tmc2209_set_stallguard(TMC2209_ADDRESS, -1, 0);
         }
 #endif
-        ESP_LOGI(TAG, "Rotate TMC2209 %d a little.", TMC2209_ADDRESS);
-        err = tmc2209_get_position(TMC2209_ADDRESS);
-        if (err >= 0) {
-            ESP_LOGI(TAG, "Starting microsteps reading is %d.", err);
-            err = ESP_OK;
-        }
-        ESP_LOGI(TAG, "Setting velocity.");
-        err = tmc2209_set_velocity(TMC2209_ADDRESS, (1000 * 64 * 4));
-        if (err >= 0) {
-            ESP_LOGI(TAG, "Velocity is now %d.", err);
-            err = ESP_OK;
-        }
-
-        ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));
-        ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
 
         if (err == ESP_OK) {
-            ESP_LOGI(TAG, "Waiting for one revolution of the 24BYJ48-034"
-                     " stepper motor (at full step resolution)...");
-            size_t sg_result_check_interval = 10;
-            for (size_t x = 0; x < sg_result_check_interval; x++) {
-                vTaskDelay(pdMS_TO_TICKS((1000 * 64) / 4 / sg_result_check_interval));
-                ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
+            ESP_LOGI(TAG, "Rotate TMC2209 %d a little.", TMC2209_ADDRESS);
+            err = tmc2209_get_position(TMC2209_ADDRESS);
+            if (err >= 0) {
+                ESP_LOGI(TAG, "Starting microsteps reading is %d.", err);
+                err = ESP_OK;
             }
         }
 
-        ESP_LOGI(TAG, "Stopping.");
-        tmc2209_set_velocity(TMC2209_ADDRESS, 0);
-        err = tmc2209_get_position(TMC2209_ADDRESS);
-        if (err >= 0) {
-            ESP_LOGI(TAG, "Microsteps reading is now %d.", err);
-            err = ESP_OK;
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "Setting velocity.");
+            err = tmc2209_set_velocity(TMC2209_ADDRESS, -1000 * 64 * 10);
+            tmc2209_motor_enable(TMC2209_ADDRESS);
+
+            ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));
+            ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
+        }
+
+       if (err == ESP_OK) {
+            ESP_LOGI(TAG, "Waiting for 20 seconds...");
+            size_t sg_result_check_interval = 10;
+            for (size_t x = 0; x < sg_result_check_interval; x++) {
+                vTaskDelay(pdMS_TO_TICKS(100000 / 4 / sg_result_check_interval));
+                ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
+                ESP_LOGI("INFO", "POSITION %d.", tmc2209_get_position(TMC2209_ADDRESS));
+            }
+        }
+
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "Stopping.");
+            tmc2209_set_velocity(TMC2209_ADDRESS, 0);
+            err = tmc2209_get_position(TMC2209_ADDRESS);
+            if (err >= 0) {
+                ESP_LOGI(TAG, "Microsteps reading is now %d.", err);
+                err = ESP_OK;
+            }
         }
 
         ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));
         ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
+
+        tmc2209_motor_disable(TMC2209_ADDRESS);
 
         ESP_LOGI(TAG, "DONE with motor stuff");
         esp_task_wdt_add(NULL);
