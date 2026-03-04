@@ -222,6 +222,16 @@ esp_err_t network_init(const char *ssid, const char *password,
             }
         }
 
+        // Set max TX power to 8 dBm as some ESP32 boards don't work reliably higher than that
+        if (err == ESP_OK) {
+            // The parameter to esp_wifi_set_max_tx_power() is in quarters of a dB
+            esp_err_t ps_err = esp_wifi_set_max_tx_power(34);
+            if (ps_err != ESP_OK) {
+                ESP_LOGW(TAG, "Unable to set TX max power to 8 dBm: %s.", esp_err_to_name(ps_err));
+                // Continue anyway, this is not fatal
+            }
+        }
+
         // Clean-up on error
         if (err != ESP_OK) {
             if (g_sta_netif) {

@@ -54,7 +54,8 @@
 #define TMC2209_RSENSE_MOHM 110
 
 // The desired stepper motor run current in milliamps
-#define STEPPER_MOTOR_CURRENT_MA 500
+//#define STEPPER_MOTOR_CURRENT_MA 500
+#define STEPPER_MOTOR_CURRENT_MA 150
 
 // The percentage of the run current to apply during hold;
 // don't need a lot, let it cool down
@@ -134,6 +135,30 @@ static void ping_loss_cb(void *arg)
 #endif
 }
 
+// Return true if the lift is at a limit, else false.
+static bool at_limit()
+{
+    bool limit = false;
+
+#if defined (CONFIG_STEPPER_LIFT_LIMIT_PIN) && (CONFIG_STEPPER_LIFT_LIMIT_PIN >= 0)
+    limit = !gpio_get_level(CONFIG_STEPPER_LIFT_LIMIT_PIN);
+#endif
+
+    return limit;
+}
+
+// Return true if the lift is fully down.
+static bool is_down()
+{
+    bool down = false;
+
+#if defined (CONFIG_STEPPER_LIFT_DOWN_PIN) && (CONFIG_STEPPER_LIFT_DOWN_PIN >= 0)
+    down = !gpio_get_level(CONFIG_STEPPER_LIFT_DOWN_PIN);
+#endif
+
+    return down;
+}
+
 /* ----------------------------------------------------------------
  * PUBLIC FUNCTIONS
  * -------------------------------------------------------------- */
@@ -160,6 +185,20 @@ void app_main(void)
                 flash_debug_led(DEBUG_LED_SHORT_MS);
             }
         }
+    }
+#endif
+
+#if defined (CONFIG_STEPPER_LIFT_LIMIT_PIN) && (CONFIG_STEPPER_LIFT_LIMIT_PIN >= 0)
+    // Configure the lift limit pin
+    if (err == ESP_OK) {
+        err = gpio_set_direction(CONFIG_STEPPER_LIFT_LIMIT_PIN, GPIO_MODE_INPUT);
+    }
+#endif
+
+#if defined (CONFIG_STEPPER_LIFT_DOWN_PIN) && (CONFIG_STEPPER_LIFT_DOWN_PIN >= 0)
+    // Configure the lift doown pin
+    if (err == ESP_OK) {
+        err = gpio_set_direction(CONFIG_STEPPER_LIFT_DOWN_PIN, GPIO_MODE_INPUT);
     }
 #endif
 
@@ -273,7 +312,8 @@ void app_main(void)
 
         if (err == ESP_OK) {
             ESP_LOGI(TAG, "Setting velocity.");
-            err = tmc2209_set_velocity(TMC2209_ADDRESS, -1000 * 64 * 10);
+//            err = tmc2209_set_velocity(TMC2209_ADDRESS, -1000 * 64 * 10);
+            err = tmc2209_set_velocity(TMC2209_ADDRESS, -1000 * 64);
             tmc2209_motor_enable(TMC2209_ADDRESS);
 
             ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));
@@ -281,12 +321,14 @@ void app_main(void)
         }
 
        if (err == ESP_OK) {
-            ESP_LOGI(TAG, "Waiting for 20 seconds...");
-            size_t sg_result_check_interval = 10;
+            ESP_LOGI(TAG, "Waiting for 27 seconds...");
+            size_t sg_result_check_interval = 50;
             for (size_t x = 0; x < sg_result_check_interval; x++) {
-                vTaskDelay(pdMS_TO_TICKS(100000 / 4 / sg_result_check_interval));
-                ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
-                ESP_LOGI("INFO", "POSITION %d.", tmc2209_get_position(TMC2209_ADDRESS));
+                vTaskDelay(pdMS_TO_TICKS(27000 / sg_result_check_interval));
+                //ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
+                //ESP_LOGI("INFO", "POSITION %d.", tmc2209_get_position(TMC2209_ADDRESS));
+                ESP_LOGI("INFO", "at limit %s, down %s.", at_limit() ? "true" : "false",
+                         is_down() ? "true" : "false");
             }
         }
 
