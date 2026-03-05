@@ -54,8 +54,8 @@
 #define TMC2209_RSENSE_MOHM 110
 
 // The desired stepper motor run current in milliamps
-//#define STEPPER_MOTOR_CURRENT_MA 500
-#define STEPPER_MOTOR_CURRENT_MA 150
+#define STEPPER_MOTOR_CURRENT_MA 500
+//#define STEPPER_MOTOR_CURRENT_MA 150
 
 // The percentage of the run current to apply during hold;
 // don't need a lot, let it cool down
@@ -310,42 +310,82 @@ void app_main(void)
             }
         }
 
-        if (err == ESP_OK) {
-            ESP_LOGI(TAG, "Setting velocity.");
-//            err = tmc2209_set_velocity(TMC2209_ADDRESS, -1000 * 64 * 10);
-            err = tmc2209_set_velocity(TMC2209_ADDRESS, -1000 * 64);
-            tmc2209_motor_enable(TMC2209_ADDRESS);
-
-            ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));
-            ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
-        }
-
        if (err == ESP_OK) {
-            ESP_LOGI(TAG, "Waiting for 27 seconds...");
-            size_t sg_result_check_interval = 50;
-            for (size_t x = 0; x < sg_result_check_interval; x++) {
-                vTaskDelay(pdMS_TO_TICKS(27000 / sg_result_check_interval));
-                //ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
-                //ESP_LOGI("INFO", "POSITION %d.", tmc2209_get_position(TMC2209_ADDRESS));
-                ESP_LOGI("INFO", "at limit %s, down %s.", at_limit() ? "true" : "false",
-                         is_down() ? "true" : "false");
+            size_t repeats = 10;
+            for (size_t y = 0; y < repeats; y++) {
+
+                int32_t velocity_sign = 1;
+                ESP_LOGI(TAG, "Setting velocity.");
+#if defined (CONFIG_STEPPER_LIFT_LIMIT_PIN) && (CONFIG_STEPPER_LIFT_LIMIT_PIN >= 0) && \
+    defined (CONFIG_STEPPER_LIFT_DOWN_PIN) && (CONFIG_STEPPER_LIFT_DOWN_PIN >= 0)
+                // If we are in the lift, set the velocity direction according
+                // to the sensors
+                if (is_down()) {
+                    ESP_LOGI("INFO", "Down indicator returns true, hence velocity positive (go up).");
+                } else {
+                    ESP_LOGI("INFO", "Down indicator returns false, hence velocity negative (go down).");
+                    velocity_sign = -1;
+                }
+#endif
+
+                err = tmc2209_set_velocity(TMC2209_ADDRESS, velocity_sign * 1000 * 64 * 10);
+//                    err = tmc2209_set_velocity(TMC2209_ADDRESS, -1000 * 64 * 3);
+                ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));
+                ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
+
+                tmc2209_motor_enable(TMC2209_ADDRESS);
+                size_t guard_time_seconds = 27;
+                ESP_LOGI(TAG, "Running for up to %d seconds...", guard_time_seconds);
+                size_t loops_per_second = 10;
+                size_t hysteresis_count = 0;
+                if (at_limit()) {
+                    // Wait three seconds after determining we are at a limit before
+                    // checking again
+                    hysteresis_count = loops_per_second * 3;
+                }
+                bool stop = false;
+                for (size_t x = 0; (x < loops_per_second * guard_time_seconds) && !stop; x++) {
+                    vTaskDelay(pdMS_TO_TICKS(1000 / loops_per_second));
+#if defined (CONFIG_STEPPER_LIFT_LIMIT_PIN) && (CONFIG_STEPPER_LIFT_LIMIT_PIN >= 0) && \
+    defined (CONFIG_STEPPER_LIFT_DOWN_PIN) && (CONFIG_STEPPER_LIFT_DOWN_PIN >= 0)
+                    ESP_LOGI("INFO", "at limit %s, down %s.", at_limit() ? "true" : "false",
+                            is_down() ? "true" : "false");
+                    // If we are in the lift, stop when the appropriate limit is hit
+                    if ((hysteresis_count == 0)) {
+                        if (at_limit()) {
+                            // Stop if we're going up or if is_down() is true
+                            if (velocity_sign > 0 || is_down()) {
+                                ESP_LOGI("INFO", "At limit, stopping.");
+                                stop = true;
+                            }
+                        }
+                    }
+                    if (hysteresis_count > 0) {
+                        hysteresis_count--;
+                    }
+#else
+                    ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
+                    ESP_LOGI("INFO", "POSITION %d.", tmc2209_get_position(TMC2209_ADDRESS));
+#endif
+                }
+
+                if (err == ESP_OK) {
+                    ESP_LOGI(TAG, "Stopping.");
+                    tmc2209_set_velocity(TMC2209_ADDRESS, 0);
+                    err = tmc2209_get_position(TMC2209_ADDRESS);
+                    if (err >= 0) {
+                        ESP_LOGI(TAG, "Microsteps reading is now %d.", err);
+                        err = ESP_OK;
+                    }
+                }
+                tmc2209_motor_disable(TMC2209_ADDRESS);
+                ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));
+                ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
+
+                ESP_LOGI(TAG, "Run %d of %d completed.", y + 1, repeats);
+                vTaskDelay(pdMS_TO_TICKS(1000));
             }
         }
-
-        if (err == ESP_OK) {
-            ESP_LOGI(TAG, "Stopping.");
-            tmc2209_set_velocity(TMC2209_ADDRESS, 0);
-            err = tmc2209_get_position(TMC2209_ADDRESS);
-            if (err >= 0) {
-                ESP_LOGI(TAG, "Microsteps reading is now %d.", err);
-                err = ESP_OK;
-            }
-        }
-
-        ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));
-        ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
-
-        tmc2209_motor_disable(TMC2209_ADDRESS);
 
         ESP_LOGI(TAG, "DONE with motor stuff");
         esp_task_wdt_add(NULL);
