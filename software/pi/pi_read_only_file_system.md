@@ -242,9 +242,10 @@ All credit goes to Chris Dzombak and those who helped him compile the guide.  Th
 
   `mount`
 
-  ...then verify that the SD card partitions are mounted `ro`, and:
+  ...then verify that the SD card partitions (e.g. `/dev/mmc*`) are mounted `ro`, and:
 
   `sudo journalctl -b 0`
 
 
  ...then scroll through and look for any issues.  When looking for issues, you will undoubtedly see some errors from various processes.  You will want to investigate those.  Start by checking "is this actually broken?".  Often there will be messages from e.g. `avahi-daemon` or `snapd` that are unhappy they cannot go about their business normally on a read-only filesystem.  But as long as that software is still working for your purposes, you can safely ignore their complaints.
+
