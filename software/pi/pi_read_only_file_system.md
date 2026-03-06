@@ -2,7 +2,7 @@ These notes taken from:
 
 https://www.dzombak.com/blog/2024/03/running-a-raspberry-pi-with-a-read-only-root-filesystem/
 
-All credit goes to Chris Dzombak and those who helped him compile the guide.  The process below worked for me on a Raspberry Pi Zero W (1.1) running Raspberry Pi OS 13 (Trixie), headless version over a Wifi network (hence disabling of Wifi is not included below).
+All credit goes to Chris Dzombak and those who helped him compile the guide.  The process below worked for me on a Raspberry Pi Zero W (1.1 and 2) running Raspberry Pi OS 13 (Trixie), headless version over a Wifi network (hence disabling of Wifi is not included below).
 
 - Run an update and reboot:
 
@@ -245,5 +245,6 @@ All credit goes to Chris Dzombak and those who helped him compile the guide.  Th
   ...then verify that the SD card partitions are mounted `ro`, and:
 
   `sudo journalctl -b 0`
+
 
  ...then scroll through and look for any issues.  When looking for issues, you will undoubtedly see some errors from various processes.  You will want to investigate those.  Start by checking "is this actually broken?".  Often there will be messages from e.g. `avahi-daemon` or `snapd` that are unhappy they cannot go about their business normally on a read-only filesystem.  But as long as that software is still working for your purposes, you can safely ignore their complaints.
