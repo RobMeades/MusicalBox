@@ -62,7 +62,7 @@ menu "Application Configuration"
             Baud rate on the UART talking to the stepper motor driver
 
     config STEPPER_ENABLE_PIN
-        int "stepper enable"
+        int "stepper enable pin"
         default 9
         help
             Pin connected to the TMC2209 EN pin
@@ -72,5 +72,24 @@ menu "Application Configuration"
         default 5
         help
             Pin connected to the TMC2209 DIAG pin
+
+    config STEPPER_LIFT_LIMIT_PIN
+        int "Lift limit pin"
+        default -1
+        help
+            Pin that goes low when the lift is at a limit, fully up or fully down
+
+    config STEPPER_LIFT_DOWN_PIN
+        int "Lift down pin"
+        default -1
+        help
+            Pin that goes low when the lift is fully down
+
+    config STEPPER_DOOR_OPEN_PIN
+        int "Door open pin"
+        default -1
+        help
+            Pin that goes low when the door is fully open
+
 
 endmenu
