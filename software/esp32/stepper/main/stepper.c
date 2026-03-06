@@ -54,8 +54,12 @@
 #define TMC2209_RSENSE_MOHM 110
 
 // The desired stepper motor run current in milliamps
-#define STEPPER_MOTOR_CURRENT_MA 500
-//#define STEPPER_MOTOR_CURRENT_MA 150
+#if defined (CONFIG_STEPPER_DOOR_OPEN_PIN) && (CONFIG_STEPPER_DOOR_OPEN_PIN >= 0)
+    // Door motors are only little
+#    define STEPPER_MOTOR_CURRENT_MA 150
+#else
+#    define STEPPER_MOTOR_CURRENT_MA 1000
+#endif
 
 // The percentage of the run current to apply during hold;
 // don't need a lot, let it cool down
@@ -80,9 +84,6 @@ static TaskHandle_t g_stall_task_handle = NULL;
 
 // A semaphore to let diag_interrupt_handler signal the stall task.
 static SemaphoreHandle_t g_diag_semaphore = NULL;
-
-// Count of the number of ping losses.
-static uint32_t g_pings_lost = 0;
 
 /* ----------------------------------------------------------------
  * STATIC FUNCTIONS
@@ -123,41 +124,29 @@ static void stall_task(void *arg)
     }
 }
 
-// Callback function for ping loss
-static void ping_loss_cb(void *arg)
-{
-    (void) arg;
-
-    g_pings_lost++;
-#if defined (CONFIG_STEPPER_DEBUG_LED_PIN) && (CONFIG_STEPPER_DEBUG_LED_PIN >= 0)
-    // Switch on the debug LED forever
-    gpio_set_level(CONFIG_STEPPER_DEBUG_LED_PIN, 0);
-#endif
-}
-
+#if defined (CONFIG_STEPPER_LIFT_LIMIT_PIN) && (CONFIG_STEPPER_LIFT_LIMIT_PIN >= 0)
 // Return true if the lift is at a limit, else false.
 static bool at_limit()
 {
-    bool limit = false;
-
-#if defined (CONFIG_STEPPER_LIFT_LIMIT_PIN) && (CONFIG_STEPPER_LIFT_LIMIT_PIN >= 0)
-    limit = !gpio_get_level(CONFIG_STEPPER_LIFT_LIMIT_PIN);
+    return !gpio_get_level(CONFIG_STEPPER_LIFT_LIMIT_PIN);
+}
 #endif
 
-    return limit;
-}
-
+#if defined (CONFIG_STEPPER_LIFT_DOWN_PIN) && (CONFIG_STEPPER_LIFT_DOWN_PIN >= 0)
 // Return true if the lift is fully down.
 static bool is_down()
 {
-    bool down = false;
-
-#if defined (CONFIG_STEPPER_LIFT_DOWN_PIN) && (CONFIG_STEPPER_LIFT_DOWN_PIN >= 0)
-    down = !gpio_get_level(CONFIG_STEPPER_LIFT_DOWN_PIN);
+    return !gpio_get_level(CONFIG_STEPPER_LIFT_DOWN_PIN);
+}
 #endif
 
-    return down;
+#if defined (CONFIG_STEPPER_DOOR_OPEN_PIN) && (CONFIG_STEPPER_DOOR_OPEN_PIN >= 0)
+// Return true if a door is in the open position.
+static bool is_open()
+{
+    return !gpio_get_level(CONFIG_STEPPER_DOOR_OPEN_PIN);
 }
+#endif
 
 /* ----------------------------------------------------------------
  * PUBLIC FUNCTIONS
@@ -196,9 +185,16 @@ void app_main(void)
 #endif
 
 #if defined (CONFIG_STEPPER_LIFT_DOWN_PIN) && (CONFIG_STEPPER_LIFT_DOWN_PIN >= 0)
-    // Configure the lift doown pin
+    // Configure the lift down pin
     if (err == ESP_OK) {
         err = gpio_set_direction(CONFIG_STEPPER_LIFT_DOWN_PIN, GPIO_MODE_INPUT);
+    }
+#endif
+
+#if defined (CONFIG_STEPPER_DOOR_OPEN_PIN) && (CONFIG_STEPPER_DOOR_OPEN_PIN >= 0)
+    // Configure the door open pin
+    if (err == ESP_OK) {
+        err = gpio_set_direction(CONFIG_STEPPER_DOOR_OPEN_PIN, GPIO_MODE_INPUT);
     }
 #endif
 
@@ -244,42 +240,13 @@ void app_main(void)
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "Initialization complete.");
 
-#if 1
         tmc2209_start(TMC2209_ADDRESS, CONFIG_STEPPER_ENABLE_PIN);
-
-        uint32_t stepper_data = 0;
-        ESP_LOGI(TAG, "Read data from TMC2209 %d.", TMC2209_ADDRESS);
-        if (tmc2209_read(TMC2209_ADDRESS, 0, &stepper_data) == sizeof(stepper_data)) {
-            ESP_LOGI(TAG, "Got back 0x%08x.", stepper_data);
-        } else {
-            ESP_LOGE(TAG, "Read failed.");
-        }
-        if (err == ESP_OK) {
-            ESP_LOGI(TAG, "Read line state of TMC2209 %d.", TMC2209_ADDRESS);
-            err = tmc2209_read_lines(TMC2209_ADDRESS);
-            if (err >= 0) {
-                ESP_LOGI(TAG, "Lines are 0x%04x.", err);
-                err = ESP_OK;
-            }
-        }
-
-        ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));
-        ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
 
         if (err == ESP_OK) {
             ESP_LOGI(TAG, "Setting TMC2209 %d to full step.", TMC2209_ADDRESS);
             err = tmc2209_set_microstep_resolution(TMC2209_ADDRESS, 1);
             if (err >= 0) {
                 ESP_LOGI(TAG, "Microstep resolution is now %d.", err);
-                err = ESP_OK;
-            }
-        }
-
-        if (err == ESP_OK) {
-            ESP_LOGI(TAG, "Getting TMC2209 %d microstep resolution.", TMC2209_ADDRESS);
-            err = tmc2209_get_microstep_resolution(TMC2209_ADDRESS);
-            if (err >= 0) {
-                ESP_LOGI(TAG, "Microstep resolution read-back is %d.", err);
                 err = ESP_OK;
             }
         }
@@ -301,35 +268,27 @@ void app_main(void)
         }
 #endif
 
-        if (err == ESP_OK) {
-            ESP_LOGI(TAG, "Rotate TMC2209 %d a little.", TMC2209_ADDRESS);
-            err = tmc2209_get_position(TMC2209_ADDRESS);
-            if (err >= 0) {
-                ESP_LOGI(TAG, "Starting microsteps reading is %d.", err);
-                err = ESP_OK;
-            }
-        }
-
        if (err == ESP_OK) {
-            size_t repeats = 10;
+        // Allow us to feed the watchdog
+        esp_task_wdt_add(NULL);
+
+
+#if defined (CONFIG_STEPPER_LIFT_LIMIT_PIN) && (CONFIG_STEPPER_LIFT_LIMIT_PIN >= 0) && \
+    defined (CONFIG_STEPPER_LIFT_DOWN_PIN) && (CONFIG_STEPPER_LIFT_DOWN_PIN >= 0)
+            // We're operating the lift
+            size_t repeats = 2;
             for (size_t y = 0; y < repeats; y++) {
 
                 int32_t velocity_sign = 1;
                 ESP_LOGI(TAG, "Setting velocity.");
-#if defined (CONFIG_STEPPER_LIFT_LIMIT_PIN) && (CONFIG_STEPPER_LIFT_LIMIT_PIN >= 0) && \
-    defined (CONFIG_STEPPER_LIFT_DOWN_PIN) && (CONFIG_STEPPER_LIFT_DOWN_PIN >= 0)
-                // If we are in the lift, set the velocity direction according
-                // to the sensors
                 if (is_down()) {
                     ESP_LOGI("INFO", "Down indicator returns true, hence velocity positive (go up).");
                 } else {
                     ESP_LOGI("INFO", "Down indicator returns false, hence velocity negative (go down).");
                     velocity_sign = -1;
                 }
-#endif
 
-                err = tmc2209_set_velocity(TMC2209_ADDRESS, velocity_sign * 1000 * 64 * 10);
-//                    err = tmc2209_set_velocity(TMC2209_ADDRESS, -1000 * 64 * 3);
+                tmc2209_set_velocity(TMC2209_ADDRESS, velocity_sign * 1000 * 64 * 10);
                 ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));
                 ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
 
@@ -346,11 +305,9 @@ void app_main(void)
                 bool stop = false;
                 for (size_t x = 0; (x < loops_per_second * guard_time_seconds) && !stop; x++) {
                     vTaskDelay(pdMS_TO_TICKS(1000 / loops_per_second));
-#if defined (CONFIG_STEPPER_LIFT_LIMIT_PIN) && (CONFIG_STEPPER_LIFT_LIMIT_PIN >= 0) && \
-    defined (CONFIG_STEPPER_LIFT_DOWN_PIN) && (CONFIG_STEPPER_LIFT_DOWN_PIN >= 0)
                     ESP_LOGI("INFO", "at limit %s, down %s.", at_limit() ? "true" : "false",
                             is_down() ? "true" : "false");
-                    // If we are in the lift, stop when the appropriate limit is hit
+                    // Stop when the appropriate limit is hit
                     if ((hysteresis_count == 0)) {
                         if (at_limit()) {
                             // Stop if we're going up or if is_down() is true
@@ -363,10 +320,7 @@ void app_main(void)
                     if (hysteresis_count > 0) {
                         hysteresis_count--;
                     }
-#else
-                    ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
-                    ESP_LOGI("INFO", "POSITION %d.", tmc2209_get_position(TMC2209_ADDRESS));
-#endif
+                    esp_task_wdt_reset();
                 }
 
                 if (err == ESP_OK) {
@@ -385,39 +339,71 @@ void app_main(void)
                 ESP_LOGI(TAG, "Run %d of %d completed.", y + 1, repeats);
                 vTaskDelay(pdMS_TO_TICKS(1000));
             }
-        }
 
+#elif defined (CONFIG_STEPPER_DOOR_OPEN_PIN) && (CONFIG_STEPPER_DOOR_OPEN_PIN >= 0)
+            // We're operating a door
+            size_t repeats = 10;
+            for (size_t y = 0; y < repeats; y++) {
+                int32_t velocity_sign = 1;
+                ESP_LOGI(TAG, "Setting velocity.");
+                if (is_open()) {
+                    ESP_LOGI("INFO", "Open indicator returns true, hence velocity positive (close).");
+                } else {
+                    ESP_LOGI("INFO", "Open indicator returns false, hence velocity negative (open).");
+                    velocity_sign = -1;
+                }
+                tmc2209_set_velocity(TMC2209_ADDRESS, velocity_sign * 1000 * 64 * 2);
+                ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));
+                ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
+
+                tmc2209_motor_enable(TMC2209_ADDRESS);
+                int64_t guard_time_ms = 2450;
+                ESP_LOGI(TAG, "Running for up to %lld milliseconds...", guard_time_ms);
+                size_t hysteresis_count = 0;
+                if (is_open()) {
+                    // Wait a while  after determining we are open before
+                    // checking again, otherwise we will never move from open
+                    hysteresis_count = 200000;
+                }
+                bool stop = false;
+                int64_t start_time = esp_timer_get_time();
+                uint64_t loop_count = 0; 
+                while (((velocity_sign < 0) && !stop) || 
+                    !(esp_timer_get_time() - start_time > (guard_time_ms * 1000))) {
+                    // Stop when the appropriate limit is hit
+                    if ((hysteresis_count == 0)) {
+                        if (is_open()) {
+                            ESP_LOGI("INFO", "Door is open, stopping.");
+                            stop = true;
+                        }
+                    }
+                    if (hysteresis_count > 0) {
+                        hysteresis_count--;
+                    }
+                    loop_count++;
+                    if (loop_count % 100000 == 0) {
+                        esp_task_wdt_reset();
+                    }
+                }
+                tmc2209_motor_disable(TMC2209_ADDRESS);
+                ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));
+                ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
+
+                ESP_LOGI(TAG, "Run %d of %d completed.", y + 1, repeats);
+                vTaskDelay(pdMS_TO_TICKS(1000));
+            }
+#endif
+
+            tmc2209_set_velocity(TMC2209_ADDRESS, 0);
+            tmc2209_motor_disable(TMC2209_ADDRESS);
+        }
         ESP_LOGI(TAG, "DONE with motor stuff");
-        esp_task_wdt_add(NULL);
         while(1) {
             vTaskDelay(pdMS_TO_TICKS(1000));
             esp_task_wdt_reset();
         }
         esp_task_wdt_delete(NULL);
-#else
-        // Ping the host
-        char hostname_buffer[64];
-        int hostname_length = network_hostname_from_url(CONFIG_STEPPER_FIRMWARE_UPG_URL, hostname_buffer, sizeof(hostname_buffer));
-        if ((hostname_length > 0) && (hostname_length < sizeof(hostname_buffer))) { 
-            while (err == ESP_OK) {
-                ESP_LOGI(TAG, "%lld second(s) since reset, %d ping(s) lost.",
-                         esp_timer_get_time() / 1000000, g_pings_lost);
-                if (g_pings_lost == 0) {
-                    // Flash the debug LED as a keep-alive
-                    flash_debug_led(DEBUG_LED_LONG_MS);
-                }
-                err = ping_start(hostname_buffer, 100, 100, -1, 1000, ping_loss_cb, NULL);
-                if (err != ESP_OK) {
-                    ESP_LOGE(TAG, "Unable to start pinging host \"%s\".", hostname_buffer);
-                } else {
-                    vTaskDelay(pdMS_TO_TICKS(10000));
-                }
-            }
-        } else {
-            ESP_LOGE(TAG, "Unable to find hostname in \"%s\" (or fit it in buffer of size %d).",
-                     CONFIG_STEPPER_FIRMWARE_UPG_URL, sizeof(hostname_buffer));
-        }
-#endif
+
     } else {
         ESP_LOGE(TAG, "Initialization failed, system cannot continue, will restart soonish.");
 #if defined CONFIG_STEPPER_DIAG_PIN && (CONFIG_STEPPER_DIAG_PIN >= 0)
