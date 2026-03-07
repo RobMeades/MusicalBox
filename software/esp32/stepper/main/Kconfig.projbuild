@@ -19,12 +19,6 @@ menu "Application Configuration"
         help
             URL of server which hosts the firmware image.
 
-    config STEPPER_SKIP_COMMON_NAME_CHECK
-        bool "Skip server certificate CN fieldcheck"
-        default n
-        help
-            This allows you to skip the validation of OTA server certificate CN field.
-
     config STEPPER_OTA_RECV_TIMEOUT_MS
         int "OTA Receive Timeout in milliseconds"
         default 5000
@@ -91,12 +85,17 @@ menu "Application Configuration"
         help
             Pin that goes low when the door is fully open
 
-    config STEPPER_TEST_ROTATION_NO_SERVER
-        int "Test configuration, rotate only, no server"
+    config STEPPER_NO_WIFI
+        int "Omit connecting to Wi-Fi (and therefore omit doing an OTA update)"
         default 0
         help
-            For testing: set to greater-than-zero to rotate a motor for a short while at a safe current, do not try to make a WiFi connection
+            Set to greater-than-zero to omit making a WiFi connection
 
+    config STEPPER_TEST_ROTATION
+        int "Test configuration, rotate only"
+        default 0
+        help
+            For testing: set to greater-than-zero to rotate a motor for a short while at a safe current, DOES check for an OTA udpate first
 
 
 endmenu

@@ -55,7 +55,7 @@
 
 // The desired stepper motor run current in milliamps
 #if (defined (CONFIG_STEPPER_DOOR_OPEN_PIN) && (CONFIG_STEPPER_DOOR_OPEN_PIN >= 0)) || \
-    (defined(CONFIG_STEPPER_TEST_ROTATION_NO_SERVER) && (CONFIG_STEPPER_TEST_ROTATION_NO_SERVER > 0)) 
+    (defined(CONFIG_STEPPER_TEST_ROTATION) && (CONFIG_STEPPER_TEST_ROTATION > 0)) 
     // Door motors are only little, and this is a safe current for any motor
 #    define STEPPER_MOTOR_CURRENT_MA 150
 #else
@@ -68,7 +68,7 @@
 
 // The desired stepper motor run current in milliamps
 #if (defined (CONFIG_STEPPER_DOOR_OPEN_PIN) && (CONFIG_STEPPER_DOOR_OPEN_PIN >= 0)) || \
-    (defined(CONFIG_STEPPER_TEST_ROTATION_NO_SERVER) && (CONFIG_STEPPER_TEST_ROTATION_NO_SERVER > 0)) 
+    (defined(CONFIG_STEPPER_TEST_ROTATION) && (CONFIG_STEPPER_TEST_ROTATION > 0)) 
     // The velocity for door operation or for testing any motor
 #    define VELOCITY_MILLIHERTZ (1000 * 64 * 2)
 
@@ -217,7 +217,7 @@ void app_main(void)
     }
 #endif
 
-#if !defined(CONFIG_STEPPER_TEST_ROTATION_NO_SERVER) || (CONFIG_STEPPER_TEST_ROTATION_NO_SERVER <= 0) 
+#if !defined(CONFIG_STEPPER_NO_WIFI) || (CONFIG_STEPPER_NO_WIFI <= 0) 
     // Initialise OTA
     if (err == ESP_OK) {
         err = ota_init();
@@ -233,7 +233,7 @@ void app_main(void)
         err = ota_update(CONFIG_STEPPER_FIRMWARE_UPG_URL, CONFIG_STEPPER_OTA_RECV_TIMEOUT_MS);
     }
 #else
-    ESP_LOGW(TAG, "TEST MODE only, not connecting to WiFi.");
+    ESP_LOGW(TAG, "CONFIG_STEPPER_NO_WIFI is greater than zero, not connecting to WiFi.");
 #endif
 
     // Initialize the TMC2209 stepper motor driver interface
@@ -296,8 +296,9 @@ void app_main(void)
 
         if (err == ESP_OK) {
 
-#if defined(CONFIG_STEPPER_TEST_ROTATION_NO_SERVER) && (CONFIG_STEPPER_TEST_ROTATION_NO_SERVER > 0) 
+#if defined(CONFIG_STEPPER_TEST_ROTATION) && (CONFIG_STEPPER_TEST_ROTATION > 0) 
             // Test mode only
+            ESP_LOGI(TAG, "TEST MODE");
             ESP_LOGI(TAG, "Setting velocity.");
             tmc2209_set_velocity(TMC2209_ADDRESS, VELOCITY_MILLIHERTZ);
             size_t run_time_seconds = 3;
@@ -308,6 +309,7 @@ void app_main(void)
 #elif defined (CONFIG_STEPPER_LIFT_LIMIT_PIN) && (CONFIG_STEPPER_LIFT_LIMIT_PIN >= 0) && \
       defined (CONFIG_STEPPER_LIFT_DOWN_PIN) && (CONFIG_STEPPER_LIFT_DOWN_PIN >= 0)
             // We're operating the lift
+            ESP_LOGI(TAG, "LIFT MODE");
             size_t repeats = 2;
             for (size_t y = 0; y < repeats; y++) {
 
@@ -374,6 +376,7 @@ void app_main(void)
 
 #elif defined (CONFIG_STEPPER_DOOR_OPEN_PIN) && (CONFIG_STEPPER_DOOR_OPEN_PIN >= 0)
             // We're operating a door
+            ESP_LOGI(TAG, "DOOR MODE");
             size_t repeats = 10;
             for (size_t y = 0; y < repeats; y++) {
                 int32_t velocity_sign = 1;
