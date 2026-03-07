@@ -467,6 +467,8 @@ esp_err_t tmc2209_start(int32_t address, int32_t pin_motor_enable)
                     if (err == ESP_OK) {
                         // Save the motor enable pin for tmc2209_motor_enable()
                         g_pin_motor_enable[address] = (gpio_num_t) pin_motor_enable;
+                        // Disable the motor to begin with
+                        setMotorEnablePin(address, false);
                     }
                 }
             }

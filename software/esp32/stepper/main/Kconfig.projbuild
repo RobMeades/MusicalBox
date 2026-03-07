@@ -91,5 +91,12 @@ menu "Application Configuration"
         help
             Pin that goes low when the door is fully open
 
+    config STEPPER_TEST_ROTATION_NO_SERVER
+        int "Test configuration, rotate only, no server"
+        default 0
+        help
+            For testing: set to greater-than-zero to rotate a motor for a short while at a safe current, do not try to make a WiFi connection
+
+
 
 endmenu

@@ -54,8 +54,9 @@
 #define TMC2209_RSENSE_MOHM 110
 
 // The desired stepper motor run current in milliamps
-#if defined (CONFIG_STEPPER_DOOR_OPEN_PIN) && (CONFIG_STEPPER_DOOR_OPEN_PIN >= 0)
-    // Door motors are only little
+#if (defined (CONFIG_STEPPER_DOOR_OPEN_PIN) && (CONFIG_STEPPER_DOOR_OPEN_PIN >= 0)) || \
+    (defined(CONFIG_STEPPER_TEST_ROTATION_NO_SERVER) && (CONFIG_STEPPER_TEST_ROTATION_NO_SERVER > 0)) 
+    // Door motors are only little, and this is a safe current for any motor
 #    define STEPPER_MOTOR_CURRENT_MA 150
 #else
 #    define STEPPER_MOTOR_CURRENT_MA 1000
@@ -64,6 +65,17 @@
 // The percentage of the run current to apply during hold;
 // don't need a lot, let it cool down
 #define STEPPER_MOTOR_HOLD_CURRENT_PERCENT 20
+
+// The desired stepper motor run current in milliamps
+#if (defined (CONFIG_STEPPER_DOOR_OPEN_PIN) && (CONFIG_STEPPER_DOOR_OPEN_PIN >= 0)) || \
+    (defined(CONFIG_STEPPER_TEST_ROTATION_NO_SERVER) && (CONFIG_STEPPER_TEST_ROTATION_NO_SERVER > 0)) 
+    // The velocity for door operation or for testing any motor
+#    define VELOCITY_MILLIHERTZ (1000 * 64 * 2)
+
+#else
+    // The velocity for lift operation
+#    define VELOCITY_MILLIHERTZ (1000 * 64 * 10)
+#endif
 
 // Standard short duration for an LED lash
 #define DEBUG_LED_SHORT_MS 50
@@ -155,6 +167,13 @@ static bool is_open()
 // Entry point
 void app_main(void)
 {
+#if defined(CONFIG_STEPPER_ENABLE_PIN) && (CONFIG_STEPPER_ENABLE_PIN >= 0)
+    // Stop the motor moving too much before it is configured,
+    if (gpio_set_level(CONFIG_STEPPER_ENABLE_PIN, 1) == ESP_OK) {
+        gpio_set_direction(CONFIG_STEPPER_ENABLE_PIN, GPIO_MODE_OUTPUT);
+    }
+#endif
+
     ESP_LOGI(TAG, "Stepper app_main start");
 
     // Create the default event loop, for everyone's use
@@ -198,6 +217,7 @@ void app_main(void)
     }
 #endif
 
+#if !defined(CONFIG_STEPPER_TEST_ROTATION_NO_SERVER) || (CONFIG_STEPPER_TEST_ROTATION_NO_SERVER <= 0) 
     // Initialise OTA
     if (err == ESP_OK) {
         err = ota_init();
@@ -212,6 +232,9 @@ void app_main(void)
     if (err == ESP_OK) {
         err = ota_update(CONFIG_STEPPER_FIRMWARE_UPG_URL, CONFIG_STEPPER_OTA_RECV_TIMEOUT_MS);
     }
+#else
+    ESP_LOGW(TAG, "TEST MODE only, not connecting to WiFi.");
+#endif
 
     // Initialize the TMC2209 stepper motor driver interface
     if (err == ESP_OK) {
@@ -268,13 +291,22 @@ void app_main(void)
         }
 #endif
 
-       if (err == ESP_OK) {
         // Allow us to feed the watchdog
         esp_task_wdt_add(NULL);
 
+        if (err == ESP_OK) {
 
-#if defined (CONFIG_STEPPER_LIFT_LIMIT_PIN) && (CONFIG_STEPPER_LIFT_LIMIT_PIN >= 0) && \
-    defined (CONFIG_STEPPER_LIFT_DOWN_PIN) && (CONFIG_STEPPER_LIFT_DOWN_PIN >= 0)
+#if defined(CONFIG_STEPPER_TEST_ROTATION_NO_SERVER) && (CONFIG_STEPPER_TEST_ROTATION_NO_SERVER > 0) 
+            // Test mode only
+            ESP_LOGI(TAG, "Setting velocity.");
+            tmc2209_set_velocity(TMC2209_ADDRESS, VELOCITY_MILLIHERTZ);
+            size_t run_time_seconds = 3;
+            ESP_LOGI(TAG, "Running the motor for %d second(s)...", run_time_seconds);
+            tmc2209_motor_enable(TMC2209_ADDRESS);
+            vTaskDelay(pdMS_TO_TICKS(run_time_seconds * 1000));
+            ESP_LOGI(TAG, "Stopping.");
+#elif defined (CONFIG_STEPPER_LIFT_LIMIT_PIN) && (CONFIG_STEPPER_LIFT_LIMIT_PIN >= 0) && \
+      defined (CONFIG_STEPPER_LIFT_DOWN_PIN) && (CONFIG_STEPPER_LIFT_DOWN_PIN >= 0)
             // We're operating the lift
             size_t repeats = 2;
             for (size_t y = 0; y < repeats; y++) {
@@ -288,7 +320,7 @@ void app_main(void)
                     velocity_sign = -1;
                 }
 
-                tmc2209_set_velocity(TMC2209_ADDRESS, velocity_sign * 1000 * 64 * 10);
+                tmc2209_set_velocity(TMC2209_ADDRESS, velocity_sign * VELOCITY_MILLIHERTZ);
                 ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));
                 ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
 
@@ -352,13 +384,14 @@ void app_main(void)
                     ESP_LOGI("INFO", "Open indicator returns false, hence velocity negative (open).");
                     velocity_sign = -1;
                 }
-                tmc2209_set_velocity(TMC2209_ADDRESS, velocity_sign * 1000 * 64 * 2);
+                tmc2209_set_velocity(TMC2209_ADDRESS, velocity_sign * VELOCITY_MILLIHERTZ);
                 ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));
                 ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
 
                 tmc2209_motor_enable(TMC2209_ADDRESS);
-                int64_t guard_time_ms = 2450;
-                ESP_LOGI(TAG, "Running for up to %lld milliseconds...", guard_time_ms);
+                int64_t close_guard_time_ms = 2450;
+                int64_t open_guard_time_ms = 3000;
+                ESP_LOGI(TAG, "Running for up to %lld milliseconds...", open_guard_time_ms);
                 size_t hysteresis_count = 0;
                 if (is_open()) {
                     // Wait a while  after determining we are open before
@@ -367,12 +400,11 @@ void app_main(void)
                 }
                 bool stop = false;
                 int64_t start_time = esp_timer_get_time();
-                uint64_t loop_count = 0; 
-                while (((velocity_sign < 0) && !stop) || 
-                    !(esp_timer_get_time() - start_time > (guard_time_ms * 1000))) {
+                while (((velocity_sign < 0) && !stop && !(esp_timer_get_time() - start_time > (open_guard_time_ms * 1000))) || 
+                    !(esp_timer_get_time() - start_time > (close_guard_time_ms * 1000))) {
                     // Stop when the appropriate limit is hit
                     if ((hysteresis_count == 0)) {
-                        if (is_open()) {
+                        if ((velocity_sign < 0) && is_open()) {
                             ESP_LOGI("INFO", "Door is open, stopping.");
                             stop = true;
                         }
@@ -380,10 +412,7 @@ void app_main(void)
                     if (hysteresis_count > 0) {
                         hysteresis_count--;
                     }
-                    loop_count++;
-                    if (loop_count % 100000 == 0) {
-                        esp_task_wdt_reset();
-                    }
+                    esp_task_wdt_reset();
                 }
                 tmc2209_motor_disable(TMC2209_ADDRESS);
                 ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));
@@ -393,7 +422,6 @@ void app_main(void)
                 vTaskDelay(pdMS_TO_TICKS(1000));
             }
 #endif
-
             tmc2209_set_velocity(TMC2209_ADDRESS, 0);
             tmc2209_motor_disable(TMC2209_ADDRESS);
         }
