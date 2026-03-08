@@ -31,22 +31,24 @@ TBC.
 All parts should be printed in black ASA unless, 15% in-fill, unless otherwise stated.
 
 ### `bottom`
-TBC.
+The `rack` should be printed on a resin printer in a nice hard resin (e.g. [Siraya Tech Build](https://siraya.tech/pages/build-user-guide)); you will likely have to chop it into two semicircles to make it fit.  Print at fastest speed, no supports or pads required.  The rest of the parts are FDM prints.
+
+The large parts, `bottom_inner` and `bottom_outer` will need supports but may be printed at fastest speed.  The remaining parts will not need supports but should be printed at higher (e.g. 0.1&nbsp;mm) resolution.
 
 ### `door`
-TBC.
+`door_x6` can be printed at fastest speed but will require supports.  When removing from the build plate, be carefuly not to bend them as their right-angleness is important.
 
 ### `sides`
-TBC.
+The difficult one: a large part to print in ASA.  Get your print chamber, or the room your printer is in if you do not have a print chamber, up to 40 C (I used a space heater), slather your print plate in Pritt Stick and keep your fingers crossed.  Print at fastest speed (no supports required, better have a brim though) and, if you still have delamination or warping issues, try reducing the in-fill to 5%.
 
 ### `top`
-TBC.
+The large part, `top`, should be printed at fastest speed, the rest at higher (e.g. 0.1&nbsp;mm) resolution if you can for a nicer finish.
 
 ### `stand`
 The `gear_*` parts should be printed on a resin printer in a nice hard resin (e.g. [Siraya Tech Build](https://siraya.tech/pages/build-user-guide)) at fastest speed, no supports or pads should be required if you are careful.  The rest of the parts are FDM prints.
 
-The large parts, `stand_lower`, `stand_upper`, `lid`, `motor_extension` and `motor_extension_cover` should be printed at fastest speed.  All bar `lid` and `motor_extension_cover` will require supports, but where possible it is worth preventing supports on holes smaller than 3&nbsp;mm as it is not really necessary and that support material can be difficult to remove.
+The large parts, `stand_lower`, `stand_upper`, `lid`, `motor_extension` and `motor_extension_cover` should be printed at fastest speed.  All bar `motor_extension_cover` will require supports, but where possible it is worth preventing supports on holes smaller than 3&nbsp;mm as it is not really necessary there and supports in tiny holes can be difficult to remove.  Removing the supports from `stand_upper` is a right-royal pain: they are so thin that the support tends to crumble rather than pull away.  There is no need to remove support material from the lettering, since that is only cosmetic and you can still read the letters, but for around the edge I found the best technique was to get a knife under the support material and slide it around.
 
-The rest of the parts should be printed in higher (e.g. 0.1 mm) resolution; only `knob_and_stepper_spindle_adapter` will require supports.
+The rest of the parts should be printed in higher (e.g. 0.1&nbsp;mm) resolution; only `knob_and_stepper_spindle_adapter`, and possibly `ftdi_mounting_plate_top` (depending how good your printer is at overhangs) will require supports.
 
 Note: to build the `stand` you will also need the seventh of those `esp32_mounting_plate_1_x7` and `tmc2209_mounting_plate_1_x7` parts from `bottom`.
