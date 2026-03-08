@@ -1,10 +1,10 @@
 # Introduction
-The instructions here describe how to set up a wifi access point from a Pi Zero W.  Note that, on the version of Raspbian I was using (Trixie), any attempt to set an access point with security failed, so these instructions set up an open Wi-Fi access point (security is provided through MAC address filtering).
+These instructions describe how to set up a Wi-Fi access point on a headless Pi Zero W.  Note that, on the version of Raspbian I was using (Trixie), any attempt to set an access point with security failed, so these instructions set up an open Wi-Fi access point (security is provided through MAC address filtering).
 
 # Preparation
-Since the Pi will lose connectivity to your Wi-Fi network (you do _not_ want an open access point on your Wi-Fi network) you must have a serial connection to the Pi.
+Since the Pi will lose connectivity to your Wi-Fi network (you do _not_ want an open access point on your Wi-Fi network) you must have a serial connection to the headless Pi.
 
-- If necessary, enter `rw` to make the Pi writeable.
+- If you have hardened the Pi, enter `rw` to make the Pi writeable.
 
 - The Pi will also lose connectivity to the internet, so install a few useful things first:
 
@@ -14,13 +14,13 @@ Since the Pi will lose connectivity to your Wi-Fi network (you do _not_ want an 
 
   - `sudo apt install python3-aiohttp`: which will be needed by `https_server.py`,
 
-  - `sudo apt install lrzsz`: this allows the `minicom` and `picocom` serial comms programs to perform file transfer,
+  - `sudo apt install lrzsz`: this allows the `minicom` and `picocom` serial communications programs to perform file transfer,
 
   - `sudo apt install tcpdump`: can be handy for debugging,
 
 - Connect a PC to the Pi's serial port and log in to it, e.g. `minicom -D /dev/ttyUSB0` on Linux.
 
-- Check that binary file uploads and downloads work, e.g. in `minicom` `CTRL-A`, `S`, `zmodem`, then find a binary file (e.g. the `stepper.bin` file that you will have built when testing the musical box) and send it, rename the uploaded file to something like `stepper_new.bin`, then in the `minicom` terminal type `sz stepper_new.bin` to send the file back, leave `minicom` and finally `diff stepper.bin stepper_new.bin` should produce no output (i.e. the files are the same).
+- Check that binary file uploads and downloads work, e.g. in `minicom` `CTRL-A`, `S`, `zmodem`, then find a binary file (e.g. the `stepper.bin` file that you will have built when testing the musical box) and send it, rename the uploaded file to something like `stepper_new.bin`, then in the `minicom` terminal type `sz stepper_new.bin` to send the file back, leave `minicom` and finally, on Linux, `diff stepper.bin stepper_new.bin` should produce no output (i.e. the files are the same).
 
 # AP Setup
 Connect to the Pi using a serial terminal and set the AP up as follows:
@@ -55,9 +55,9 @@ Connect to the Pi using a serial terminal and set the AP up as follows:
 - If you want to bring the AP down, `sudo nmcli connection down MusicalBox` and the Pi will return to having a connection to your Wi-Fi network.
 
 # HTTPS Server Setup
-All of the ESP32 boards will want to make an HTTPS connection to the access point to download their binary files; this is what the Python script `https_server.py` does.  Connect to the Pi using a serial terminal and get it running as follow:
+All of the ESP32 boards will want to make an HTTPS connection to the access point to download updates to their programs; this is what the Python script `https_server.py` does.  To get it running with the ESP32s, connect a serial terminal to the Pi and do the following:
 
-- Create a directory off your `home ` directory named `fw`.
+- Create a directory off your home directory named `fw`.
 
 - Copy the `https_server.py` script to this directory with:
 
@@ -67,11 +67,11 @@ All of the ESP32 boards will want to make an HTTPS connection to the access poin
 
   `openssl req -newkey rsa:2048 -x509 -days 36500 -nodes -out ca_cert.pem -keyout ca_key.pem`
 
-  ...leaving all entries blank by entering `.` _except_ the Common Name entry, which *must* be set `10.10.3.1`.
+  ...leaving all entries blank by entering `.` _except_ the Common Name entry, which *must* be set `10.10.3.1` (the IP address of the Pi as an access point).
 
 - On a PC which has the ESP32 software environment installed on it, and has a clone of this repository, replace the file `MusicalBox/software/esp32/stepper/server_certs/ca_cert.pem` with the `ca_cert.pem` you just generated.
 
-- Build the ESP-IDF `stepper` application with the flag `CONFIG_STEPPER_TEST_ROTATION` set to 1 (leave the flag `CONFIG_STEPPER_NO_WIFI` set to 0 so that the ESP32 should contact try to contact the new server).
+- Build the ESP-IDF `stepper` application with the flag `CONFIG_STEPPER_TEST_ROTATION` set to 1 (leave the flag `CONFIG_STEPPER_NO_WIFI` set to 0 so that the ESP32 _should_ contact the new server).
 
 - Copy the newly created `stepper.bin` file to the `~/fw` directory on the Pi.
 
@@ -79,9 +79,9 @@ All of the ESP32 boards will want to make an HTTPS connection to the access poin
 
   `python https_server.py`
 
-- Plug the build PC into an ESP32 (likely the one that is inside the stand of the musical box), download the newly created `stepper.bin` to the ESP32 and monitor the output of the ESP32.  You should see that the ESP connects to the Wi-Fi access point of the Pi, downloads at least the start of the file `stepper.bin`, realises it does not need to do an update, drops the HTTPS connection and continues to the motor rotation test.
+- Plug the same build PC into an ESP32 (likely the one that is inside the stand of the musical box), flash the newly created `stepper.bin` to the ESP32 and monitor the output of the ESP32.  You should see that the ESP connects to the Wi-Fi access point of the Pi, downloads at least the start of the file `stepper.bin` via HTTPS, realises it does not need to do an update, drops the HTTPS connection and continues to the motor rotation part of the test.
 
-- If successful, create `sudo nano /lib/systemd/system/https_server.service` with the following contents:
+- If this all works, create `sudo nano /lib/systemd/system/https_server.service` with the following contents:
 
   ```
   [Unit]
@@ -99,7 +99,7 @@ All of the ESP32 boards will want to make an HTTPS connection to the access poin
   WantedBy=multi-user.target
   ```
 
-- Test that the service works with:
+- Test that the service starts with:
 
   `sudo systemctl start https_server`
 
@@ -107,16 +107,16 @@ All of the ESP32 boards will want to make an HTTPS connection to the access poin
 
   `sudo systemctl status https_server`
 
-  ...should show nice green things.  Maybe reboot the ESP32 and watch its output again to ensure all is good.  You might also run:
+  ...should show nice green things.  Maybe reboot the ESP32 and watch its output again as it connects to the Wi-Fi AP and the HTTPS server to ensure all is good.  You might also run:
 
   `journalctl -u https_server.service -f`
 
-  ...on the Raspberry Pi to live-monitor the output of the `https_server` service as the ESP32 is connecting.
+  ...on the Pi to live-monitor the output of the `https_server` service as the ESP32 is connecting.
 
 - To make the service run at boot:
 
   `sudo systemctl enable https_server`
 
-  ...then take the power down and up again; the motor should rotate when everything has come up.
+  ...then take the power down and up again; the motor attached to the ESP32 should rotate once everything has come up.
 
-- If necessary, put the Pi back into read-only mode with the command `ro`.
+- If you had hardened the Pi, put it back into read-only mode with the command `ro`.
