@@ -1,7 +1,7 @@
-#Introduction
+# Introduction
 The instructions here describe how to set up a wifi access point from a Pi Zero W.  Note that, on the version of Raspbian I was using (Trixie), any attempt to set an access point with security failed, so these instructions set up an open Wi-Fi access point (security is provided through MAC address filtering).
 
-#Preparation
+# Preparation
 Since the Pi will lose connectivity to your Wi-Fi network (you do _not_ want an open access point on your Wi-Fi network) you must have a serial connection to the Pi.
 
 - If necessary, enter `rw` to make the Pi writeable.
@@ -22,7 +22,7 @@ Since the Pi will lose connectivity to your Wi-Fi network (you do _not_ want an 
 
 - Check that binary file uploads and downloads work, e.g. in `minicom` `CTRL-A`, `S`, `zmodem`, then find a binary file (e.g. the `stepper.bin` file that you will have built when testing the musical box) and send it, rename the uploaded file to something like `stepper_new.bin`, then in the `minicom` terminal type `sz stepper_new.bin` to send the file back, leave `minicom` and finally `diff stepper.bin stepper_new.bin` should produce no output (i.e. the files are the same).
 
-#AP Setup
+# AP Setup
 Connect to the Pi using a serial terminal and set the AP up as follows:
 
 - On the Pi, `sudo nano /etc/NetworkManager/NetworkManager.conf` and:
@@ -54,7 +54,7 @@ Connect to the Pi using a serial terminal and set the AP up as follows:
 
 - If you want to bring the AP down, `sudo nmcli connection down MusicalBox` and the Pi will return to having a connection to your Wi-Fi network.
 
-#HTTPS Server Setup
+# HTTPS Server Setup
 All of the ESP32 boards will want to make an HTTPS connection to the access point to download their binary files; this is what the Python script `https_server.py` does.  Connect to the Pi using a serial terminal and get it running as follow:
 
 - Create a directory off your `home ` directory named `fw`.
