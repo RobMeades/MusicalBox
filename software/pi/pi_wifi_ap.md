@@ -1,5 +1,5 @@
 # Introduction
-These instructions describe how to set up a Wi-Fi access point on a headless Pi Zero W.  Note that, on the version of Raspbian I was using (Trixie), any attempt to set an access point with security failed, so these instructions set up an open Wi-Fi access point (security is provided through MAC address filtering).
+These instructions describe how to set up a Wi-Fi access point on a headless Pi Zero W.  Note that, on the version of Raspbian I was using (Trixie), any attempt to set an access point with security failed, so these instructions set up an open Wi-Fi access point (security is provided later through [MAC address filtering](pi_wifi_dhcp_mac.md)).
 
 # Preparation
 Since the Pi will lose connectivity to your Wi-Fi network (you do _not_ want an open access point on your Wi-Fi network) you must have a serial connection to the headless Pi.
@@ -15,6 +15,8 @@ Since the Pi will lose connectivity to your Wi-Fi network (you do _not_ want an 
   - `sudo apt install python3-aiohttp`: which will be needed by `https_server.py`,
 
   - `sudo apt install lrzsz`: this allows the `minicom` and `picocom` serial communications programs to perform file transfer,
+  
+  - `sudo apt install iptables iptables-persistent`: will be needed for MAC address filtering,
 
   - `sudo apt install tcpdump`: can be handy for debugging,
 
