@@ -1,10 +1,10 @@
 # Introduction
 This folder contains the Blender files and associated exported `.stl` files for the musical box project.
 
-- `music_1.blend` plus associated `musical_box_scale_1.stl`, `musical_box_exercises.stl` and `musical_box_camberwick_green_*.stl`: the Blender file contains objects that help to process the `.svg` files generated over in the [music](../music) directory, see there for more information.
+- `music_1.blend` plus associated `musical_box_scale_1.stl`, `musical_box_exercises.stl` and `musical_box_camberwick_green_*.stl`: the Blender file contains objects that help to process the `.svg` files generated over in the [music](../music) directory, see the Python script there for more information on how the `.svg` files are generated.
 - `musical_box.blend`/`musical_box.stl`: this is the main Blender file that contains all of the components for the musical box and is described further below.
 
-Throughout the convention is adopted that a component that must be printed multiple times has "xN" on the end, where "N" is the number of times, e.g. `esp32_mounting_plate_1_x7`.
+Throughout the convention is adopted that a component that must be printed multiple times has "xN" on the end, where "N" is the number of times, e.g. `esp32_mounting_plate_x7`.
 
 # `musical_box.blend`
 There are three main components in `musical_box.blend`:
@@ -33,10 +33,10 @@ All parts should be printed in black ASA unless, 15% in-fill, unless otherwise s
 ### `bottom`
 The `rack` should be printed on a resin printer in a nice hard resin (e.g. [Siraya Tech Build](https://siraya.tech/pages/build-user-guide)); you will likely have to chop it into two semicircles to make it fit.  Print at fastest speed, no supports or pads required.  The rest of the parts are FDM prints.
 
-The large parts, `bottom_inner` and `bottom_outer` will need supports but may be printed at fastest speed.  The remaining parts will not need supports but should be printed at higher (e.g. 0.1&nbsp;mm) resolution.
+The large parts, `bottom_inner` and `bottom_outer` will need supports but may be printed at fastest speed.  The remaining parts will not need supports but should be printed at higher (e.g. 0.1&nbsp;mm) resolution with one exception: `bottom_inner_guide_tool` is not actually part of the musical box, it is just an alignment tool for use during assembly when gluing `bottom_inner_guide` into place, hence it can be printed in anything you like and at highest speed (no supports required).
 
 ### `door`
-`door_x6` can be printed at fastest speed but will require supports.  When removing from the build plate, be carefuly not to bend them as their right-angleness is important.
+`door_x6` can be printed at fastest speed but will require supports.  When removing from the build plate, be carefuly not to bend them as their right-angledness is important.
 
 ### `sides`
 The difficult one: a large part to print in ASA.  Get your print chamber, or the room your printer is in if you do not have a print chamber, up to 40 C (I used a space heater), slather your print plate in Pritt Stick and keep your fingers crossed.  Print at fastest speed (no supports required, better have a brim though) and, if you still have delamination or warping issues, try reducing the in-fill to 5%.
@@ -51,4 +51,4 @@ The large parts, `stand_lower`, `stand_upper`, `lid`, `motor_extension` and `mot
 
 The rest of the parts should be printed in higher (e.g. 0.1&nbsp;mm) resolution; only `knob_and_stepper_spindle_adapter`, and possibly `ftdi_mounting_plate_top` (depending how good your printer is at overhangs) will require supports.
 
-Note: to build the `stand` you will also need the seventh of those `esp32_mounting_plate_1_x7` and `tmc2209_mounting_plate_1_x7` parts from `bottom`.
+Note: to build the `stand` you will also need the seventh of those `esp32_mounting_plate_x7` and `tmc2209_mounting_plate_x7` parts from `bottom`.
