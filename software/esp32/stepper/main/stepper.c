@@ -72,7 +72,7 @@
 #    define VELOCITY_MILLIHERTZ (1000 * 64 * 8)
 #elif (defined (CONFIG_STEPPER_DOOR_OPEN_PIN) && (CONFIG_STEPPER_DOOR_OPEN_PIN >= 0))
     // The velocity for door operation
-#    define VELOCITY_MILLIHERTZ (1000 * 64 * 2)
+#    define VELOCITY_MILLIHERTZ (1000 * 64)
 #else
     // The velocity for lift operation
 #    define VELOCITY_MILLIHERTZ (1000 * 64 * 10)
@@ -398,8 +398,9 @@ void app_main(void)
                 err = tmc2209_stop_that_bloody_racket(TMC2209_ADDRESS, 3, 3, 6, 0);
             }
             if (err == ESP_OK) {
-                size_t repeats = 10;
-                for (size_t y = 0; y < repeats; y++) {
+                size_t repeats = 11;
+                bool stop = false;
+                for (size_t y = 0; (y < repeats) || stop; y++) { // "stop" here to always end closed
                     int32_t velocity_sign = 1;
                     ESP_LOGI(TAG, "Setting velocity.");
                     if (is_open()) {
@@ -418,11 +419,11 @@ void app_main(void)
                     ESP_LOGI(TAG, "Running for up to %lld milliseconds...", open_guard_time_ms);
                     size_t hysteresis_count = 0;
                     if (is_open()) {
-                        // Wait a while  after determining we are open before
+                        // Wait a while after determining we are open before
                         // checking again, otherwise we will never move from open
                         hysteresis_count = 200000;
                     }
-                    bool stop = false;
+                    stop = false;
                     int64_t start_time = esp_timer_get_time();
                     while (((velocity_sign < 0) && !stop && !(esp_timer_get_time() - start_time > (open_guard_time_ms * 1000))) || // opening
                         ((velocity_sign > 0) && !(esp_timer_get_time() - start_time > (close_guard_time_ms * 1000)))) {         // closing
