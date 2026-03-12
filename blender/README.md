@@ -25,7 +25,9 @@ Below find printing instructions for all three of these components.  All musical
 Print at 0.1&nbsp;mm layer height in black ASA aside from parts 13 and 14 which should be printed in natural ASA, a bright colour for the optical sensors; that or paint those part afterwards.  In Michael Burger's original no supports were required but the modification have meant that parts 2, 7, 8 and 11 do now require supports on the build plate.
 
 ## `plinky_plonky`
-TBC.
+All parts should be print at fastest speed in black ASA aside from `plinky_plonky_mount_reflector` which should be printed in white or natural ASA (or it could be painted afterwards I guess).
+
+`plinky_plonky_mount`, being a relatively large/wide ASA part, should probably be printed with only 5% in-fill to prevent warpage picking up your print plate.  The remaining parts should be printed with 15% in-fill.  Supports are required only for the roller-holder arches of `plinky_plonky_mount` and the inset for the screw head in `plinky_plonky_mount_lid`; I allowed automatic support placement and added support blockers for other regions of `plinky_plonky_mount`: though its cabling tunnels can print a little ropey they are perfectly fine and a little ropiness is probably easier than trying to remove support material from cramped spaces.
 
 ## `musical_box`
 All parts should be printed in black ASA unless, 15% in-fill, unless otherwise stated.
@@ -39,7 +41,7 @@ The large parts, `bottom_inner` and `bottom_outer` will need supports but may be
 `door_x6` can be printed at fastest speed but will require supports.  When removing from the build plate, be carefuly not to bend them as their right-angledness is important.
 
 ### `sides`
-The difficult one: a large part to print in ASA.  Get your print chamber, or the room your printer is in if you do not have a print chamber, up to 40 C (I used a space heater), slather your print plate in Pritt Stick and keep your fingers crossed.  Print at fastest speed (no supports required, better have a brim though) and, if you still have delamination or warping issues, try reducing the in-fill to 5%.
+`column_x6` can be printed at fastest speed, the rest probably higher resolution if you can, but it is not critical.  None of the parts require supports.
 
 ### `top`
 The large part, `top`, should be printed at fastest speed, the rest at higher (e.g. 0.1&nbsp;mm) resolution if you can for a nicer finish.
