@@ -153,7 +153,7 @@ esp_err_t network_init(const char *ssid, const char *password,
         // Register event handlers for WiFi and IP
         if (err == ESP_OK) {
             err = esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, 
-                                            &wifi_event_handler, NULL);
+                                             &wifi_event_handler, NULL);
             if (err != ESP_OK) {
                 ESP_LOGE(TAG, "Failed to register WiFi event handler: %s.", esp_err_to_name(err));
             }
@@ -177,7 +177,7 @@ esp_err_t network_init(const char *ssid, const char *password,
         // Configure WiFi connection
         if (err == ESP_OK) {
             strncpy((char *) wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid));
-            if (password != NULL) {
+            if (password != NULL && (strlen(password) > 0)) {
                 strncpy((char *) wifi_config.sta.password, password, sizeof(wifi_config.sta.password));
             }
             wifi_config.sta.threshold.authmode = auth_mode;
@@ -200,16 +200,6 @@ esp_err_t network_init(const char *ssid, const char *password,
             }
         }
 
-        // Wait for IP address (with timeout)
-        if (err == ESP_OK) {
-            if (xSemaphoreTake(g_wifi_semaphore, pdMS_TO_TICKS(60000)) == pdTRUE) {
-                ESP_LOGI(TAG, "WiFi connected, IP obtained.");
-            } else {
-                ESP_LOGE(TAG, "Failed to obtain IP address within timeout.");
-                err = ESP_ERR_TIMEOUT;
-            }
-        }
-
         // Disable WiFi power save mode for best OTA operation
         if (err == ESP_OK) {
             esp_err_t ps_err = esp_wifi_set_ps(WIFI_PS_NONE);
@@ -226,6 +216,16 @@ esp_err_t network_init(const char *ssid, const char *password,
             if (ps_err != ESP_OK) {
                 ESP_LOGW(TAG, "Unable to set TX max power to 8 dBm: %s.", esp_err_to_name(ps_err));
                 // Continue anyway, this is not fatal
+            }
+        }
+
+        // Wait for IP address (with timeout)
+        if (err == ESP_OK) {
+            if (xSemaphoreTake(g_wifi_semaphore, pdMS_TO_TICKS(60000)) == pdTRUE) {
+                ESP_LOGI(TAG, "WiFi connected, IP obtained.");
+            } else {
+                ESP_LOGE(TAG, "Failed to obtain IP address within timeout.");
+                err = ESP_ERR_TIMEOUT;
             }
         }
 

@@ -473,7 +473,7 @@ esp_err_t tmc2209_start(int32_t address, int32_t pin_motor_enable)
                 }
             }
         }
-        ESP_LOGI(TAG, "Starting TMC2209 %d%, s.", address, buffer);
+        ESP_LOGI(TAG, "Starting TMC2209 %d, %s.", address, buffer);
         if (err == ESP_OK) {
             err = write_reg(address, 0, TMC2209_REG_GCONF_DEFAULTS);
             if (err != ESP_OK) {
@@ -679,6 +679,33 @@ esp_err_t tmc2209_set_velocity(int32_t address,
     return write_reg(address, 0x22, milliHertz); 
 }
 
+// Set the StealthChop threshold.
+esp_err_t tmc2209_set_stealth_chop_threshold(int32_t address,
+                                             int32_t threshold)
+{
+    // Write to the TPWMTHRESH register (0x13)
+    return write_reg(address, 0x13, threshold); 
+}
+
+// Configure the chopper in a TMC2209.
+esp_err_t tmc2209_stop_that_bloody_racket(int32_t address,
+                                          uint8_t tbl,
+                                          uint8_t toff,
+                                          uint8_t hstrt,
+                                          int8_t hend)
+{
+   // Read the CHOPCONF register
+    esp_err_t err = read_reg(address, 0x6c);
+    if (err >= 0) {
+        // TOFF is in bits 0 to 3, HSTRT in bits 4 to 6,
+        // HEND in bits 7 to 10 and TBL in bits 15 and 16
+        err = (err & 0xfffe7800) | (toff & 0x0f) | (((uint32_t) (hstrt & 0x07)) << 4) | (((uint32_t) (hend & 0x0f)) << 7) | (((uint32_t) (tbl & 0x03)) << 15); 
+        err =  write_reg(address, 0x6c, err); 
+    }
+
+    return err;
+}
+
 // Get the value of TSTEP from a TMC2209.
 esp_err_t tmc2209_get_tstep(int32_t address)
 {
@@ -742,6 +769,22 @@ esp_err_t tmc2209_set_stallguard(int32_t address,
 void tmc2209_deinit_stallguard(int32_t pin)
 {
     gpio_isr_handler_remove((gpio_num_t) pin);
+}
+
+// Set the CoolStep threshold registers.
+esp_err_t tmc2209_set_coolstep(int32_t address, uint8_t seimin,
+                               uint8_t semin, uint8_t semax)
+{
+   // Read the CoolStep register (0x42)
+    esp_err_t err = read_reg(address, 0x42);
+    if (err >= 0) {
+        // SEMIN is in bits 0 to 3, SEMAX bits 8 to 11, SEIMIN bit 15
+        err = (err & 0xffffe0f0) | (semax & 0x0f) | (((uint32_t) (semin & 0x0f)) << 8) | (((uint32_t) (seimin & 0x01)) << 15);
+        // Write the new value back
+        err =  write_reg(address, 0x42, err); 
+    }
+
+    return err;
 }
 
 // End of file

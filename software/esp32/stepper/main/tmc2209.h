@@ -236,6 +236,9 @@ esp_err_t tmc2209_unset_current(int32_t address);
  * its own internal step generator, i.e. it WILL START
  * MOVING IMMEDIATELY.
  *
+ * Note: for operation at low speeds you might want to
+ * look at tmc2209_set_stealth_chop_threshold();
+ *
  * @param address    the address of the device, range 0 to 3.
  * @param milliHertz the step rate in millihertz, i.e.
  *                   a value of 1000 would be one step per
@@ -245,6 +248,49 @@ esp_err_t tmc2209_unset_current(int32_t address);
  */
 esp_err_t tmc2209_set_velocity(int32_t address,
                                int32_t milliHertz);
+
+/** Set the TSTEP value below which the TMC2209 will leave
+ * leave SpreadCycle mode and switch to StealthChop mode,
+ * which is quiter and more efficient at faster speeds.
+ * When TSTEP is low (higher speeds), StealthChop is better
+ * because it is quieter and more efficient, however it can
+ * cause motor stalls because of the clever current control.
+ *
+ * Note: if you find you have to use SpreadCycle mode,
+ * you may want to look at tmc2209_stop_that_bloody_racket().
+ *
+ * @param address    the address of the device, range 0 to 3.
+ * @param threshold  the value of TSTEP below which
+ *                   SpreadCycle should be abandoned for
+ *                   StealthChop mode.  A special value of
+ *                   0 means "always stay in StealthChop mode",
+ *                   use UINT32_MAX to disable switching
+ *                   to StealthChop entirely.
+ * @return           zero on success else negative error
+ *                   code from esp_err_t.
+ */
+esp_err_t tmc2209_set_stealth_chop_threshold(int32_t address,
+                                             int32_t threshold);
+
+/** Configure the chopper in a TMC2209, usually to stop
+ * a motor sounding like a cricket in SpreadCycle mode, 
+ * see section 5.5 of the data sheet for an explanation
+ * of the parameters.
+ *
+ * @param address the address of the device, range 0 to 3.
+ * @param tbl     set the blank time.
+ * @param toff    set the off time.
+ * @param hstrt   set the hysteresis low value.
+ * @param hend    set the hysteresis value added to hstrt,
+ *                hend + hstart must be 16 or less.
+ * @return        zero on success else negative error
+ *                code from esp_err_t.
+ */
+esp_err_t tmc2209_stop_that_bloody_racket(int32_t address,
+                                          uint8_t tbl,
+                                          uint8_t toff,
+                                          uint8_t hstrt,
+                                          int8_t hend);
 
 /** Get the value of TSTEP from a TMC2209 device; this
  * value may be required when setting stallguard
@@ -337,7 +383,8 @@ esp_err_t tmc2209_init_stallguard(int32_t address,
  *                    this code set a default value that
  *                    is the same as the TSTEP value in the
  *                    chip, meaning that stallguard should
- *                    always be active.
+ *                    always be active.  Use a value of
+ *                    UINT32_MAX to disable StallGuard 
  * @param sgthrs      the value of SGTHRS to set in the
  *                    TMC2209.
  * @return            zero on success, else negative error
@@ -359,6 +406,26 @@ esp_err_t tmc2209_set_stallguard(int32_t address,
  *                tmc2209_init_stallguard().
  */
 void tmc2209_deinit_stallguard(int32_t pin);
+
+/** Set the CoolStep threshold registers in a TMC2209,
+ * see section 12 of the data sheet for an explanation.
+ * To disable CoolStep, set seimin and semax both to 0.
+ *
+ * @param address the address of the device, range 0 to 3.
+ * @param seimin  the minimum current in CoolStep mode:
+ *                use 0 for half of the normal setting
+ *                (good if IRUN >= 10), use 1 for 1/4 of
+ *                of the normal setting (good if IRUN >= 20).
+ * @param semin   if SGRESULT goes below this value the
+ *                current to the motor is increased.
+ * @param semax   if SGRESULT goes above this value often
+ *                enough the current to the motor is
+ *                decreased.
+ * @return        zero on success, else negative error
+ *                code from esp_err_t.
+ */
+esp_err_t tmc2209_set_coolstep(int32_t address, uint8_t seimin,
+                               uint8_t semin, uint8_t semax);
 
 #ifdef __cplusplus
 }

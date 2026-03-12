@@ -66,12 +66,13 @@
 // don't need a lot, let it cool down
 #define STEPPER_MOTOR_HOLD_CURRENT_PERCENT 20
 
-// The desired stepper motor run current in milliamps
-#if (defined (CONFIG_STEPPER_DOOR_OPEN_PIN) && (CONFIG_STEPPER_DOOR_OPEN_PIN >= 0)) || \
-    (defined(CONFIG_STEPPER_TEST_ROTATION) && (CONFIG_STEPPER_TEST_ROTATION > 0)) 
-    // The velocity for door operation or for testing any motor
+// The desired stepper motor velocity
+#if (defined(CONFIG_STEPPER_TEST_ROTATION) && (CONFIG_STEPPER_TEST_ROTATION > 0)) 
+    // The velocity for testing any motor
+#    define VELOCITY_MILLIHERTZ (1000 * 64 * 8)
+#elif (defined (CONFIG_STEPPER_DOOR_OPEN_PIN) && (CONFIG_STEPPER_DOOR_OPEN_PIN >= 0))
+    // The velocity for door operation
 #    define VELOCITY_MILLIHERTZ (1000 * 64 * 2)
-
 #else
     // The velocity for lift operation
 #    define VELOCITY_MILLIHERTZ (1000 * 64 * 10)
@@ -263,7 +264,7 @@ void app_main(void)
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "Initialization complete.");
 
-        tmc2209_start(TMC2209_ADDRESS, CONFIG_STEPPER_ENABLE_PIN);
+        err = tmc2209_start(TMC2209_ADDRESS, CONFIG_STEPPER_ENABLE_PIN);
 
         if (err == ESP_OK) {
             ESP_LOGI(TAG, "Setting TMC2209 %d to full step.", TMC2209_ADDRESS);
@@ -377,52 +378,73 @@ void app_main(void)
 #elif defined (CONFIG_STEPPER_DOOR_OPEN_PIN) && (CONFIG_STEPPER_DOOR_OPEN_PIN >= 0)
             // We're operating a door
             ESP_LOGI(TAG, "DOOR MODE");
-            size_t repeats = 10;
-            for (size_t y = 0; y < repeats; y++) {
-                int32_t velocity_sign = 1;
-                ESP_LOGI(TAG, "Setting velocity.");
-                if (is_open()) {
-                    ESP_LOGI("INFO", "Open indicator returns true, hence velocity positive (close).");
-                } else {
-                    ESP_LOGI("INFO", "Open indicator returns false, hence velocity negative (open).");
-                    velocity_sign = -1;
-                }
-                tmc2209_set_velocity(TMC2209_ADDRESS, velocity_sign * VELOCITY_MILLIHERTZ);
-                ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));
-                ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
+            // Switch off StallGuard and CoolStep as they don't work well at low speeds
+            ESP_LOGI(TAG, "Switching off StallGuard and CoolStep.");
+            err = tmc2209_set_stealth_chop_threshold(TMC2209_ADDRESS, UINT32_MAX);
+            if (err == ESP_OK) {
+                // Quieten things down: these values derived using the Trinamic
+                // spreadsheet:
+                //
+                // https://www.analog.com/media/en/engineering-tools/design-tools/tmc2209_calculations.xlsx
+                //
+                // ..."chopper parameters" tab, with input values for the
+                // 24BYJ48-034 stepper motor:
+                //
+                // 30 Ohms, 30 mH (estimate), 183 mA, 12 V, TBL = 3, TOFF = 3:
+                //
+                //                ***** HSTRT = 6, HEND = 0 *****
+                //
+                // These reduce the cricket buzz to a rapid ticking 
+                err = tmc2209_stop_that_bloody_racket(TMC2209_ADDRESS, 3, 3, 6, 0);
+            }
+            if (err == ESP_OK) {
+                size_t repeats = 10;
+                for (size_t y = 0; y < repeats; y++) {
+                    int32_t velocity_sign = 1;
+                    ESP_LOGI(TAG, "Setting velocity.");
+                    if (is_open()) {
+                        ESP_LOGI("INFO", "Open indicator returns true, hence velocity positive (close).");
+                    } else {
+                        ESP_LOGI("INFO", "Open indicator returns false, hence velocity negative (open).");
+                        velocity_sign = -1;
+                    }
+                    tmc2209_set_velocity(TMC2209_ADDRESS, velocity_sign * VELOCITY_MILLIHERTZ * 2);
+                    ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));
+                    ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
 
-                tmc2209_motor_enable(TMC2209_ADDRESS);
-                int64_t close_guard_time_ms = 2450;
-                int64_t open_guard_time_ms = 3000;
-                ESP_LOGI(TAG, "Running for up to %lld milliseconds...", open_guard_time_ms);
-                size_t hysteresis_count = 0;
-                if (is_open()) {
-                    // Wait a while  after determining we are open before
-                    // checking again, otherwise we will never move from open
-                    hysteresis_count = 200000;
-                }
-                bool stop = false;
-                int64_t start_time = esp_timer_get_time();
-                while (((velocity_sign < 0) && !stop && !(esp_timer_get_time() - start_time > (open_guard_time_ms * 1000))) || 
-                    !(esp_timer_get_time() - start_time > (close_guard_time_ms * 1000))) {
-                    // Stop when the appropriate limit is hit
-                    if ((hysteresis_count == 0)) {
-                        if ((velocity_sign < 0) && is_open()) {
-                            ESP_LOGI("INFO", "Door is open, stopping.");
-                            stop = true;
+                    tmc2209_motor_enable(TMC2209_ADDRESS);
+                    int64_t close_guard_time_ms = 2450;
+                    int64_t open_guard_time_ms = 3000;
+                    ESP_LOGI(TAG, "Running for up to %lld milliseconds...", open_guard_time_ms);
+                    size_t hysteresis_count = 0;
+                    if (is_open()) {
+                        // Wait a while  after determining we are open before
+                        // checking again, otherwise we will never move from open
+                        hysteresis_count = 200000;
+                    }
+                    bool stop = false;
+                    int64_t start_time = esp_timer_get_time();
+                    while (((velocity_sign < 0) && !stop && !(esp_timer_get_time() - start_time > (open_guard_time_ms * 1000))) || // opening
+                        ((velocity_sign > 0) && !(esp_timer_get_time() - start_time > (close_guard_time_ms * 1000)))) {         // closing
+                        // Stop when the appropriate limit is hit
+                        if ((hysteresis_count == 0)) {
+                            if ((velocity_sign < 0) && is_open()) {
+                                ESP_LOGI("INFO", "Door is open, stopping.");
+                                stop = true;
+                            }
                         }
+                        if (hysteresis_count > 0) {
+                            hysteresis_count--;
+                        }
+                        esp_task_wdt_reset();
                     }
-                    if (hysteresis_count > 0) {
-                        hysteresis_count--;
-                    }
-                    esp_task_wdt_reset();
-                }
-                tmc2209_motor_disable(TMC2209_ADDRESS);
-                ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));
-                ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
+                    tmc2209_motor_disable(TMC2209_ADDRESS);
+                    ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));
+                    ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
 
-                ESP_LOGI(TAG, "Run %d of %d completed.", y + 1, repeats);
-                vTaskDelay(pdMS_TO_TICKS(1000));
+                    ESP_LOGI(TAG, "Run %d of %d completed.", y + 1, repeats);
+                    vTaskDelay(pdMS_TO_TICKS(1000));
+                }
             }
 #endif
             tmc2209_set_velocity(TMC2209_ADDRESS, 0);
