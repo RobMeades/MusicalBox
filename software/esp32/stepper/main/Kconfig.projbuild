@@ -67,6 +67,12 @@ menu "Application Configuration"
         help
             Pin connected to the TMC2209 DIAG pin
 
+    config STEPPER_PLINKY_PLONKY_REFERENCE_PIN
+        int "Plinky-plonky reference pin"
+        default -1
+        help
+            Pin that goes low when the optical sensor is triggered
+
     config STEPPER_LIFT_LIMIT_PIN
         int "Lift limit pin"
         default -1
@@ -90,12 +96,6 @@ menu "Application Configuration"
         default 0
         help
             Set to greater-than-zero to omit making a WiFi connection
-
-    config STEPPER_TEST_ROTATION
-        int "Test configuration, rotate only"
-        default 0
-        help
-            For testing: set to greater-than-zero to rotate a motor for a short while at a safe current, DOES check for an OTA udpate first
 
 
 endmenu
