@@ -60,8 +60,8 @@
 
 // The desired stepper motor velocity and current
 #if (defined (CONFIG_STEPPER_PLINKY_PLONKY_REFERENCE_PIN) && (CONFIG_STEPPER_PLINKY_PLONKY_REFERENCE_PIN >= 0))
-    // The velocity and current for plinky-plonky operation
-#   define VELOCITY_MILLIHERTZ (1000 * 64 * 12)
+    // The velocity and current for plinky-plonky operation (double normal speed)
+#   define VELOCITY_MILLIHERTZ (1000 * 64 * 6 * 2)
 #   define STEPPER_MOTOR_CURRENT_MA 1000
 #elif (defined (CONFIG_STEPPER_DOOR_OPEN_PIN) && (CONFIG_STEPPER_DOOR_OPEN_PIN >= 0))
     // The velocity and current for door operation

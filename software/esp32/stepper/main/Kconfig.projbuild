@@ -97,5 +97,4 @@ menu "Application Configuration"
         help
             Set to greater-than-zero to omit making a WiFi connection
 
-
 endmenu
