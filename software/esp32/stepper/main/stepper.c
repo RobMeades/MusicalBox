@@ -30,6 +30,7 @@
 #include "driver/gpio.h"
 #include "esp_timer.h"
 #include "esp_task_wdt.h"
+#include "esp_mac.h"
 
 #include "ota.h"
 #include "network.h"
@@ -223,6 +224,12 @@ void app_main(void)
 #endif
 
     ESP_LOGI(TAG, "Stepper app_main start");
+
+    // Print out our Wi-Fi MAC address, if possible
+    uint8_t mac[6] = {0};
+    if (esp_read_mac(mac, ESP_MAC_WIFI_STA) == ESP_OK) {
+        ESP_LOGI(TAG, "MAC address %02X:%02X:%02X:%02X:%02X:%02X", mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
+    }
 
     // Create the default event loop, for everyone's use
     esp_err_t err = esp_event_loop_create_default();
