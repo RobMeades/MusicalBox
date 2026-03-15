@@ -30,6 +30,7 @@
 #include "driver/gpio.h"
 #include "esp_timer.h"
 #include "esp_task_wdt.h"
+#include "esp_mac.h"
 
 #include "ota.h"
 #include "network.h"
@@ -53,29 +54,28 @@
 // the BigTreeTech board uses 100 milliOhms
 #define TMC2209_RSENSE_MOHM 110
 
-// The desired stepper motor run current in milliamps
-#if (defined (CONFIG_STEPPER_DOOR_OPEN_PIN) && (CONFIG_STEPPER_DOOR_OPEN_PIN >= 0)) || \
-    (defined(CONFIG_STEPPER_TEST_ROTATION) && (CONFIG_STEPPER_TEST_ROTATION > 0)) 
-    // Door motors are only little, and this is a safe current for any motor
-#    define STEPPER_MOTOR_CURRENT_MA 150
-#else
-#    define STEPPER_MOTOR_CURRENT_MA 1000
-#endif
-
 // The percentage of the run current to apply during hold;
 // don't need a lot, let it cool down
 #define STEPPER_MOTOR_HOLD_CURRENT_PERCENT 20
 
-// The desired stepper motor velocity
-#if (defined(CONFIG_STEPPER_TEST_ROTATION) && (CONFIG_STEPPER_TEST_ROTATION > 0)) 
-    // The velocity for testing any motor
-#    define VELOCITY_MILLIHERTZ (1000 * 64 * 8)
+// The desired stepper motor velocity and current
+#if (defined (CONFIG_STEPPER_PLINKY_PLONKY_REFERENCE_PIN) && (CONFIG_STEPPER_PLINKY_PLONKY_REFERENCE_PIN >= 0))
+    // The velocity and current for plinky-plonky operation (double normal speed)
+#   define VELOCITY_MILLIHERTZ (1000 * 64 * 6 * 2)
+#   define STEPPER_MOTOR_CURRENT_MA 1000
 #elif (defined (CONFIG_STEPPER_DOOR_OPEN_PIN) && (CONFIG_STEPPER_DOOR_OPEN_PIN >= 0))
-    // The velocity for door operation
-#    define VELOCITY_MILLIHERTZ (1000 * 64)
-#else
+    // The velocity and current for door operation
+#   define VELOCITY_MILLIHERTZ (1000 * 64 * 2)
+#   define STEPPER_MOTOR_CURRENT_MA 150
+#elif defined (CONFIG_STEPPER_LIFT_LIMIT_PIN) && (CONFIG_STEPPER_LIFT_LIMIT_PIN >= 0) && \
+      defined (CONFIG_STEPPER_LIFT_DOWN_PIN) && (CONFIG_STEPPER_LIFT_DOWN_PIN >= 0)
     // The velocity for lift operation
-#    define VELOCITY_MILLIHERTZ (1000 * 64 * 10)
+#   define VELOCITY_MILLIHERTZ (1000 * 64 * 10)
+#   define STEPPER_MOTOR_CURRENT_MA 1000
+#else
+    // The velocity and a safe current for testing any motor
+#   define VELOCITY_MILLIHERTZ (1000 * 64 * 2)
+#   define STEPPER_MOTOR_CURRENT_MA 150
 #endif
 
 // Standard short duration for an LED lash
@@ -83,6 +83,15 @@
 
 // Standard short duration for a long LED lash
 #define DEBUG_LED_LONG_MS 1000
+
+// How often to check a pin for debounce, in microseconds
+#define DEBOUNCE_CHECK_PERIOD_US 1000
+
+// The debounce threshold: if DEBOUNCE_CHECK_PERIOD_US is
+// once a milliseconds then a value of 20 here means that the
+// sensor will have had to have signalled open for the last
+// 20 milliseconds to be open
+#define DEBOUNCE_THRESHOLD 20
 
 /* ----------------------------------------------------------------
  * TYPES
@@ -97,6 +106,12 @@ static TaskHandle_t g_stall_task_handle = NULL;
 
 // A semaphore to let diag_interrupt_handler signal the stall task.
 static SemaphoreHandle_t g_diag_semaphore = NULL;
+
+#if (defined (CONFIG_STEPPER_DOOR_OPEN_PIN) && (CONFIG_STEPPER_DOOR_OPEN_PIN >= 0)) || \
+    (defined (CONFIG_STEPPER_PLINKY_PLONKY_REFERENCE_PIN) && (CONFIG_STEPPER_PLINKY_PLONKY_REFERENCE_PIN >= 0))
+// A count variable for sensor debouncing.
+static size_t g_sensor_triggered_count = 0;
+#endif
 
 /* ----------------------------------------------------------------
  * STATIC FUNCTIONS
@@ -137,10 +152,50 @@ static void stall_task(void *arg)
     }
 }
 
+#if (defined (CONFIG_STEPPER_DOOR_OPEN_PIN) && (CONFIG_STEPPER_DOOR_OPEN_PIN >= 0)) || \
+    (defined (CONFIG_STEPPER_PLINKY_PLONKY_REFERENCE_PIN) && (CONFIG_STEPPER_PLINKY_PLONKY_REFERENCE_PIN >= 0))
+
+#if defined (CONFIG_STEPPER_PLINKY_PLONKY_REFERENCE_PIN) && (CONFIG_STEPPER_PLINKY_PLONKY_REFERENCE_PIN >= 0)
+// Return true if the plinky-plonky is at its reference position.
+static bool is_at_reference()
+{
+    // Return the result of plinky-plonky sensor_debounce_callback() tracking
+    return g_sensor_triggered_count >= DEBOUNCE_THRESHOLD;
+}
+#endif
+
+#if defined (CONFIG_STEPPER_DOOR_OPEN_PIN) && (CONFIG_STEPPER_DOOR_OPEN_PIN >= 0)
+// Return true if a door is in the open position.
+static bool is_open()
+{
+    // Return the result of door sensor_debounce_callback() tracking
+    return g_sensor_triggered_count >= DEBOUNCE_THRESHOLD;
+}
+#endif
+
+// Debounce timer callback function for reading a sensor.
+static void sensor_debounce_callback(void* arg)
+{
+    gpio_num_t  pin = (gpio_num_t ) arg;
+    if (!gpio_get_level(pin)) {
+        // The sensor is pulled low
+        g_sensor_triggered_count++;
+        if (g_sensor_triggered_count >= DEBOUNCE_THRESHOLD) {
+            // For the unlikely case of a wrap
+            g_sensor_triggered_count = DEBOUNCE_THRESHOLD;
+        }
+    } else {
+        // Not open, reset the count
+        g_sensor_triggered_count = 0;
+    }
+}
+#endif
+
 #if defined (CONFIG_STEPPER_LIFT_LIMIT_PIN) && (CONFIG_STEPPER_LIFT_LIMIT_PIN >= 0)
 // Return true if the lift is at a limit, else false.
 static bool at_limit()
 {
+    // It's nice and dark in the lift, doesn't seem to need debouncing
     return !gpio_get_level(CONFIG_STEPPER_LIFT_LIMIT_PIN);
 }
 #endif
@@ -149,15 +204,8 @@ static bool at_limit()
 // Return true if the lift is fully down.
 static bool is_down()
 {
+    // It's nice and dark in the lift, doesn't seem to need debouncing
     return !gpio_get_level(CONFIG_STEPPER_LIFT_DOWN_PIN);
-}
-#endif
-
-#if defined (CONFIG_STEPPER_DOOR_OPEN_PIN) && (CONFIG_STEPPER_DOOR_OPEN_PIN >= 0)
-// Return true if a door is in the open position.
-static bool is_open()
-{
-    return !gpio_get_level(CONFIG_STEPPER_DOOR_OPEN_PIN);
 }
 #endif
 
@@ -176,6 +224,12 @@ void app_main(void)
 #endif
 
     ESP_LOGI(TAG, "Stepper app_main start");
+
+    // Print out our Wi-Fi MAC address, if possible
+    uint8_t mac[6] = {0};
+    if (esp_read_mac(mac, ESP_MAC_WIFI_STA) == ESP_OK) {
+        ESP_LOGI(TAG, "MAC address %02X:%02X:%02X:%02X:%02X:%02X", mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
+    }
 
     // Create the default event loop, for everyone's use
     esp_err_t err = esp_event_loop_create_default();
@@ -297,16 +351,66 @@ void app_main(void)
 
         if (err == ESP_OK) {
 
-#if defined(CONFIG_STEPPER_TEST_ROTATION) && (CONFIG_STEPPER_TEST_ROTATION > 0) 
-            // Test mode only
-            ESP_LOGI(TAG, "TEST MODE");
-            ESP_LOGI(TAG, "Setting velocity.");
-            tmc2209_set_velocity(TMC2209_ADDRESS, VELOCITY_MILLIHERTZ);
-            size_t run_time_seconds = 3;
-            ESP_LOGI(TAG, "Running the motor for %d second(s)...", run_time_seconds);
-            tmc2209_motor_enable(TMC2209_ADDRESS);
-            vTaskDelay(pdMS_TO_TICKS(run_time_seconds * 1000));
-            ESP_LOGI(TAG, "Stopping.");
+#if defined (CONFIG_STEPPER_PLINKY_PLONKY_REFERENCE_PIN) && (CONFIG_STEPPER_PLINKY_PLONKY_REFERENCE_PIN >= 0)
+            // We're operating the plinky-plonky
+            ESP_LOGI(TAG, "PLINKY-PLONKY MODE");
+            if (err == ESP_OK) {
+                // Start a timer to read the pin and debounce it
+                esp_timer_create_args_t reference_sensor_debounce_timer_args = {sensor_debounce_callback,
+                                                                                (void *) CONFIG_STEPPER_PLINKY_PLONKY_REFERENCE_PIN,
+                                                                                ESP_TIMER_TASK,
+                                                                                "plinky-plonky debounce",
+                                                                                false};
+                esp_timer_handle_t reference_sensor_handle = NULL;
+                if (err == ESP_OK) {
+                    err = esp_timer_create(&reference_sensor_debounce_timer_args, &reference_sensor_handle);
+                    if (err == ESP_OK) {
+                        err = esp_timer_start_periodic(reference_sensor_handle, DEBOUNCE_CHECK_PERIOD_US);
+                    }
+                }
+                if (err == ESP_OK) {
+                    bool stop = false;
+                    ESP_LOGI(TAG, "Setting velocity.");
+                    tmc2209_set_velocity(TMC2209_ADDRESS, VELOCITY_MILLIHERTZ);
+                    ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));
+                    ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
+
+                    tmc2209_motor_enable(TMC2209_ADDRESS);
+                    int64_t guard_time_ms = 30000;
+                    ESP_LOGI(TAG, "Running for up to %lld milliseconds...", guard_time_ms);
+                    size_t hysteresis_count = 0;
+                    if (is_at_reference()) {
+                        // Wait a while after determining we are open before
+                        // checking again, otherwise we will never move from open
+                        hysteresis_count = 200000;
+                    }
+                    stop = false;
+                    int64_t start_time = esp_timer_get_time();
+                    while ((!stop && !(esp_timer_get_time() - start_time > (guard_time_ms * 1000)))) {
+                        // Stop when the reference point is reached
+                        if ((hysteresis_count == 0)) {
+                            if (is_at_reference()) {
+                                ESP_LOGI("INFO", "At reference, stopping.");
+                                stop = true;
+                            }
+                        }
+                        if (hysteresis_count > 0) {
+                            hysteresis_count--;
+                        }
+                        esp_task_wdt_reset();
+                        // Yield to let the idle task run and reset its watchdog
+                        vTaskDelay(pdMS_TO_TICKS(10));
+                    }
+                    tmc2209_motor_disable(TMC2209_ADDRESS);
+                    ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));
+                    ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
+                    ESP_LOGI(TAG, "Run completed.");
+                }
+                if (reference_sensor_handle != NULL) {
+                    esp_timer_stop(reference_sensor_handle);
+                    esp_timer_delete(reference_sensor_handle);
+                }
+            }
 #elif defined (CONFIG_STEPPER_LIFT_LIMIT_PIN) && (CONFIG_STEPPER_LIFT_LIMIT_PIN >= 0) && \
       defined (CONFIG_STEPPER_LIFT_DOWN_PIN) && (CONFIG_STEPPER_LIFT_DOWN_PIN >= 0)
             // We're operating the lift
@@ -356,6 +460,8 @@ void app_main(void)
                         hysteresis_count--;
                     }
                     esp_task_wdt_reset();
+                    // Yield to let the idle task run and reset its watchdog
+                    vTaskDelay(pdMS_TO_TICKS(10));
                 }
 
                 if (err == ESP_OK) {
@@ -398,55 +504,86 @@ void app_main(void)
                 err = tmc2209_stop_that_bloody_racket(TMC2209_ADDRESS, 3, 3, 6, 0);
             }
             if (err == ESP_OK) {
-                size_t repeats = 11;
-                bool stop = false;
-                for (size_t y = 0; (y < repeats) || stop; y++) { // "stop" here to always end closed
-                    int32_t velocity_sign = 1;
-                    ESP_LOGI(TAG, "Setting velocity.");
-                    if (is_open()) {
-                        ESP_LOGI("INFO", "Open indicator returns true, hence velocity positive (close).");
-                    } else {
-                        ESP_LOGI("INFO", "Open indicator returns false, hence velocity negative (open).");
-                        velocity_sign = -1;
+                // Start a timer to read the pin and debounce it
+                esp_timer_create_args_t door_sensor_debounce_timer_args = {sensor_debounce_callback,
+                                                                           (void *) CONFIG_STEPPER_DOOR_OPEN_PIN,
+                                                                            ESP_TIMER_TASK,
+                                                                           "door debounce",
+                                                                           false};
+                esp_timer_handle_t door_sensor_handle = NULL;
+                if (err == ESP_OK) {
+                    err = esp_timer_create(&door_sensor_debounce_timer_args, &door_sensor_handle);
+                    if (err == ESP_OK) {
+                        err = esp_timer_start_periodic(door_sensor_handle, DEBOUNCE_CHECK_PERIOD_US);
                     }
-                    tmc2209_set_velocity(TMC2209_ADDRESS, velocity_sign * VELOCITY_MILLIHERTZ * 2);
-                    ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));
-                    ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
+                }
+                if (err == ESP_OK) {
+                    size_t repeats = 10;
+                    bool stop = false;
+                    for (size_t y = 0; (y < repeats) || stop; y++) { // "stop" here to always end closed
+                        int32_t velocity_sign = 1;
+                        ESP_LOGI(TAG, "Setting velocity.");
+                        if (is_open()) {
+                            ESP_LOGI("INFO", "Open indicator returns true, hence velocity positive (close).");
+                        } else {
+                            ESP_LOGI("INFO", "Open indicator returns false, hence velocity negative (open).");
+                            velocity_sign = -1;
+                        }
+                        tmc2209_set_velocity(TMC2209_ADDRESS, velocity_sign * VELOCITY_MILLIHERTZ);
+                        ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));
+                        ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
 
-                    tmc2209_motor_enable(TMC2209_ADDRESS);
-                    int64_t close_guard_time_ms = 2450;
-                    int64_t open_guard_time_ms = 3000;
-                    ESP_LOGI(TAG, "Running for up to %lld milliseconds...", open_guard_time_ms);
-                    size_t hysteresis_count = 0;
-                    if (is_open()) {
-                        // Wait a while after determining we are open before
-                        // checking again, otherwise we will never move from open
-                        hysteresis_count = 200000;
-                    }
-                    stop = false;
-                    int64_t start_time = esp_timer_get_time();
-                    while (((velocity_sign < 0) && !stop && !(esp_timer_get_time() - start_time > (open_guard_time_ms * 1000))) || // opening
-                        ((velocity_sign > 0) && !(esp_timer_get_time() - start_time > (close_guard_time_ms * 1000)))) {         // closing
-                        // Stop when the appropriate limit is hit
-                        if ((hysteresis_count == 0)) {
-                            if ((velocity_sign < 0) && is_open()) {
-                                ESP_LOGI("INFO", "Door is open, stopping.");
-                                stop = true;
+                        tmc2209_motor_enable(TMC2209_ADDRESS);
+                        int64_t close_guard_time_ms = 2550;
+                        int64_t open_guard_time_ms = 3000;
+                        ESP_LOGI(TAG, "Running for up to %lld milliseconds...", open_guard_time_ms);
+                        size_t hysteresis_count = 0;
+                        if (is_open()) {
+                            // Wait a while after determining we are open before
+                            // checking again, otherwise we will never move from open
+                            hysteresis_count = 200000;
+                        }
+                        stop = false;
+                        int64_t start_time = esp_timer_get_time();
+                        while (((velocity_sign < 0) && !stop && !(esp_timer_get_time() - start_time > (open_guard_time_ms * 1000))) || // opening
+                            ((velocity_sign > 0) && !(esp_timer_get_time() - start_time > (close_guard_time_ms * 1000)))) {         // closing
+                            // Stop when the appropriate limit is hit
+                            if ((hysteresis_count == 0)) {
+                                if ((velocity_sign < 0) && is_open()) {
+                                    ESP_LOGI("INFO", "Door is open, stopping.");
+                                    stop = true;
+                                }
                             }
+                            if (hysteresis_count > 0) {
+                                hysteresis_count--;
+                            }
+                            esp_task_wdt_reset();
+                            // Yield to let the idle task run and reset its watchdog
+                            vTaskDelay(pdMS_TO_TICKS(10));
                         }
-                        if (hysteresis_count > 0) {
-                            hysteresis_count--;
-                        }
-                        esp_task_wdt_reset();
-                    }
-                    tmc2209_motor_disable(TMC2209_ADDRESS);
-                    ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));
-                    ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
+                        tmc2209_motor_disable(TMC2209_ADDRESS);
+                        ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));
+                        ESP_LOGI("INFO", "SG_RESULT %d.", tmc2209_get_sg_result(TMC2209_ADDRESS));
 
-                    ESP_LOGI(TAG, "Run %d of %d completed.", y + 1, repeats);
-                    vTaskDelay(pdMS_TO_TICKS(1000));
+                        ESP_LOGI(TAG, "Run %d of %d completed.", y + 1, repeats);
+                        vTaskDelay(pdMS_TO_TICKS(1000));
+                    }
+                }
+                if (door_sensor_handle != NULL) {
+                    esp_timer_stop(door_sensor_handle);
+                    esp_timer_delete(door_sensor_handle);
                 }
             }
+#else
+            // Test mode only
+            ESP_LOGI(TAG, "TEST MODE");
+            ESP_LOGI(TAG, "Setting velocity.");
+            tmc2209_set_velocity(TMC2209_ADDRESS, VELOCITY_MILLIHERTZ);
+            size_t run_time_seconds = 3;
+            ESP_LOGI(TAG, "Running the motor for up to %d second(s)...", run_time_seconds);
+            tmc2209_motor_enable(TMC2209_ADDRESS);
+            vTaskDelay(pdMS_TO_TICKS(run_time_seconds * 1000));
+            ESP_LOGI(TAG, "Stopping.");
 #endif
             tmc2209_set_velocity(TMC2209_ADDRESS, 0);
             tmc2209_motor_disable(TMC2209_ADDRESS);
