@@ -4,7 +4,10 @@ This folder contains the Blender files and associated exported `.stl` files for 
 - `music_1.blend` plus associated `musical_box_scale_1.stl`, `musical_box_exercises.stl` and `musical_box_camberwick_green_*.stl`: the Blender file contains objects that help to process the `.svg` files generated over in the [music](../music) directory, see the Python script there for more information on how the `.svg` files are generated.
 - `musical_box.blend`/`musical_box.stl`: this is the main Blender file that contains all of the components for the musical box and is described further below.
 
-Throughout the convention is adopted that a component that must be printed multiple times has "xN" on the end, where "N" is the number of times, e.g. `esp32_mounting_plate_x7`.
+Throughout the convention is adopted that a component that must be printed multiple times has "xN" on the end, where "N" is the number of times, e.g. `bottom_esp32_mounting_plate_x7`.
+
+# `music_1.blend`
+In order to print cleanly, musical belts must be printed slowly and be cooled well: the fan must be kept at 100% and no speed must be greater than 30&nbsp;mm/s.  Though I would have liked to have printed this in ASA, I couldn't get it to stick well enough and so printed in PLA; highest resolution with 100% in-fill, no supports or brim required.
 
 # `musical_box.blend`
 There are three main components in `musical_box.blend`:
@@ -24,33 +27,35 @@ Below find printing instructions for all three of these components.  All musical
 ## 'lifting_table`
 Print at 0.1&nbsp;mm layer height in black ASA aside from parts 13 and 14 which should be printed in natural ASA, a bright colour for the optical sensors; that or paint those part afterwards.  In Michael Burger's original no supports were required but the modification have meant that parts 2, 7, 8 and 11 do now require supports on the build plate.
 
-## `plinky_plonky`
-All parts should be print at fastest speed in black ASA aside from `plinky_plonky_mount_reflector` which should be printed in white or natural ASA (or it could be painted afterwards I guess).
+## `plinky_plonky_mount`
+All parts should be print at fastest speed, 15% in-fill, in black ASA aside from `plinky_plonky_mount_reflector` which should be printed in white or natural ASA (or it could be painted afterwards I guess).
 
-`plinky_plonky_mount`, being a relatively large/wide ASA part, should probably be printed with only 5% in-fill to prevent warpage picking up your print plate.  The remaining parts should be printed with 15% in-fill.  Supports are required only for the roller-holder arches of `plinky_plonky_mount` and the inset for the screw head in `plinky_plonky_mount_lid`; I allowed automatic support placement and added support blockers for other regions of `plinky_plonky_mount`: though its cabling tunnels can print a little ropey they are perfectly fine and a little ropiness is probably easier than trying to remove support material from cramped spaces.
+`plinky_plonky_mount`, being a relatively large/wide ASA part, may need some car to avoid delamination due to warping, or lifting of the print plate.  If you have a print chamber you are fine, if not you may need to get the room that the printer is in up to 40&nbsp;C (I use a space heater).  Supports are required only for the roller-holder arches of `plinky_plonky_mount` and the inset for the screw head in `plinky_plonky_mount_lid`; I allowed automatic support placement and added support blockers for the other regions of `plinky_plonky_mount`: though its cabling tunnels can print a little ropey they are perfectly functional (not visible) and a little ropiness is probably easier than trying to remove support material from cramped spaces.
+
+Note: be careful when removing the support material from the roller-holders or you may snap them off; best to poke the material through from the side.
 
 ## `musical_box`
 All parts should be printed in black ASA unless, 15% in-fill, unless otherwise stated.
 
 ### `bottom`
-The `rack` should be printed on a resin printer in a nice hard resin (e.g. [Siraya Tech Build](https://siraya.tech/pages/build-user-guide)); you will likely have to chop it into two semicircles to make it fit.  Print at fastest speed, no supports or pads required.  The rest of the parts are FDM prints.
+The `bottom_rack` should be printed on a resin printer in a nice hard resin (e.g. [Siraya Tech Build](https://siraya.tech/pages/build-user-guide)); you will likely have to chop it into two semicircles to make it fit.  Print at fastest speed, no supports or pads required.  The rest of the parts are FDM prints.
 
 The large parts, `bottom_inner` and `bottom_outer` will need supports but may be printed at fastest speed.  The remaining parts will not need supports but should be printed at higher (e.g. 0.1&nbsp;mm) resolution with one exception: `bottom_inner_guide_tool` is not actually part of the musical box, it is just an alignment tool for use during assembly when gluing `bottom_inner_guide` into place, hence it can be printed in anything you like and at highest speed (no supports required).
 
 ### `door`
-`door_x6` can be printed at fastest speed but will require supports.  When removing from the build plate, be carefuly not to bend them as their right-angledness is important.
+`door_x6` can be printed at fastest speed but will require supports.  When removing from the build plate, be carefuly not to bend them as their right-angledness is important.  You may wish to print an additional `door_x6` to use when test fitting flatted brass bar.
 
 ### `sides`
-`column_x6` can be printed at fastest speed, the rest probably higher resolution if you can, but it is not critical.  None of the parts require supports.
+`sides_column_x6` and `sides_brace` can be printed at fastest speed, the rest probably higher resolution if you can, but it is not critical.  You may wish to print an additional `sides_stepper_spindle_adapter_x6` to use when test fitting flatted brass bar.  None of the parts require supports.
 
 ### `top`
 The large part, `top`, should be printed at fastest speed, the rest at higher (e.g. 0.1&nbsp;mm) resolution if you can for a nicer finish.
 
 ### `stand`
-The `gear_*` parts should be printed on a resin printer in a nice hard resin (e.g. [Siraya Tech Build](https://siraya.tech/pages/build-user-guide)) at fastest speed, no supports or pads should be required if you are careful.  The rest of the parts are FDM prints.
+The `stand_gear_*` parts should be printed on a resin printer in a nice hard resin (e.g. [Siraya Tech Build](https://siraya.tech/pages/build-user-guide)) at fastest speed, no supports or pads should be required if you are careful.  The rest of the parts are FDM prints.
 
-The large parts, `stand_lower`, `stand_upper`, `lid`, `motor_extension` and `motor_extension_cover` should be printed at fastest speed.  All bar `motor_extension_cover` will require supports, but where possible it is worth preventing supports on holes smaller than 3&nbsp;mm as it is not really necessary there and supports in tiny holes can be difficult to remove.  Removing the supports from `stand_upper` is a right-royal pain: they are so thin that the support tends to crumble rather than pull away.  There is no need to remove support material from the lettering, since that is only cosmetic and you can still read the letters, but for around the edge I found the best technique was to get a knife under the support material and slide it around.
+The large parts, `stand_lower`, `stand_upper`, `stand_lid`, `stand_motor_extension` and `stand_motor_extension_cover` should be printed at fastest speed.  All bar `stand_motor_extension_cover` will require supports, but where possible it is worth preventing supports on holes smaller than 3&nbsp;mm as it is not really necessary there and supports in tiny holes can be difficult to remove.  Removing the supports from `stand_upper` is a right-royal pain: they are so thin that the support tends to crumble rather than pull away.  There is no need to remove support material from the lettering, since that is only cosmetic and you can still read the letters, but for around the edge I found the best technique was to get a knife under the support material and slide it around.
 
-The rest of the parts should be printed in higher (e.g. 0.1&nbsp;mm) resolution; only `knob_and_stepper_spindle_adapter`, and possibly `ftdi_mounting_plate_top` (depending how good your printer is at overhangs) will require supports.
+The rest of the parts should be printed in higher (e.g. 0.1&nbsp;mm) resolution; only `stand_knob_and_stepper_spindle_adapter`, and possibly `stand_ftdi_mounting_plate_top` (depending how good your printer is at overhangs) will require supports.
 
-Note: to build the `stand` you will also need the seventh of those `esp32_mounting_plate_x7` and `tmc2209_mounting_plate_x7` parts from `bottom`.
+Note: to build the `stand` you will also need the seventh of those `bottom_esp32_mounting_plate_x7` and `bottom_tmc2209_mounting_plate_x7` parts from `bottom`.
