@@ -1,0 +1,240 @@
+<!--
+This file was written by a Python script, plinky_plonky_strip_maker.py.  It represents notes on a paper strip, suitable for feeding into a plinky-plonky device such as this:
+
+https://www.ebay.co.uk/itm/397246486151
+
+...visible in action here:
+
+https://youtu.be/XHdWuA18UNk
+
+For more information on the project this was part of (and to find the Python script) see here:
+
+https://www.meades.org/misc/musical_box/musical_box.html
+
+The original paper strip had a distance between quavers beats of 4 mm in the X axis and a step of 2 mm between each note in the Y axis (leading to a total height of 28 mm for all 15 notes (14 steps)). SVG uses only pixels, not millimetres: in this file we use 2 millimetre(s) per pixel and a speed scale factor of 0.5, so the step between notes on the Y axis is 4 pixel(s) and the distance between quavers beats on the X axis is 16 pixel(s).  Note that it is a fundamental limitation of these plinky-plonky machines that you cannot play the same note more than once within a crotchet beat.  This is because the little cams that get caught on the note holes and trigger the sound need to rotate a crotchet's distance around to spring the ping.
+
+The top and bottom margins between the edge of the paper strip and the notes on the original paper strip was 6.5 mm, therefore it is 13 pixel(s) here. In an SVG file the origin, 0/0, is at top left.  In the original paper strip there was a 30 mm run-in between the point of the black triangle at the front of the strip and the first note, therefore the X coordinate of the first note here is 60 pixel(s).  The Y coordinate of the lowest note on the original paper strip was at 6.5 mm (for the top margin) plus 28 mm (for the 15 notes), which makes it (28 + 6.5) * 2 = 69 pixel(s).
+-->
+
+<!--
+This is the outline of the paper strip, so it must be 60 (for the lead-in) plus 16 * the number of quavers beats wide (applying the speed scale factor of 0.5), plus 20 to give a pleasing margin, (6.5 * 2 + 28) * 2 = 82 high, with origin at 0,0.
+-->
+<svg width="1264" height="82" viewBox="0 0 1264 82" fill="none" xmlns="http://www.w3.org/2000/svg">
+
+<!--
+This rectangle is the outline of the paper strip, so it must be 60 (for the lead-in) plus 16 * the number of quaver beats wide (applying the speed scale factor of 0.5), plus the 20 pleasing end-margin, (6.5 * 2 + 28) * 2 = 82 high, with origin at 0,0.
+-->
+<rect id="outline" x="0" y="0" width="1264" height="82" fill="lightgray"/>
+
+<!--
+As a visual aid, add horizontal lines for each note.  In the X axis these all start at 60 (i.e. after the lead-in) and are 16 * the number of quaver beats long (with a speed scale factor of 0.5).  In the Y axis the top-most note will be at 13, subsequent notes at intervals of 4. The note lines are given IDs for each note, of the form c0 for lowest C, c1 for the next C, c2 for the top-most C (which is the top-most note), etc.
+-->
+<line id="pitch c2" x1="60" y1="13" x2="1228.0" y2="13" stroke="darkblue" stroke-width="0.2"/>
+<line id="pitch b1" x1="60" y1="17" x2="1228.0" y2="17" stroke="darkblue" stroke-width="0.2"/>
+<line id="pitch a1" x1="60" y1="21" x2="1228.0" y2="21" stroke="darkblue" stroke-width="0.2"/>
+<line id="pitch g1" x1="60" y1="25" x2="1228.0" y2="25" stroke="darkblue" stroke-width="0.2"/>
+<line id="pitch f1" x1="60" y1="29" x2="1228.0" y2="29" stroke="darkblue" stroke-width="0.2"/>
+<line id="pitch e1" x1="60" y1="33" x2="1228.0" y2="33" stroke="darkblue" stroke-width="0.2"/>
+<line id="pitch d1" x1="60" y1="37" x2="1228.0" y2="37" stroke="darkblue" stroke-width="0.2"/>
+<line id="pitch c1" x1="60" y1="41" x2="1228.0" y2="41" stroke="darkblue" stroke-width="0.2"/>
+<line id="pitch b0" x1="60" y1="45" x2="1228.0" y2="45" stroke="darkblue" stroke-width="0.2"/>
+<line id="pitch a0" x1="60" y1="49" x2="1228.0" y2="49" stroke="darkblue" stroke-width="0.2"/>
+<line id="pitch g0" x1="60" y1="53" x2="1228.0" y2="53" stroke="darkblue" stroke-width="0.2"/>
+<line id="pitch f0" x1="60" y1="57" x2="1228.0" y2="57" stroke="darkblue" stroke-width="0.2"/>
+<line id="pitch e0" x1="60" y1="61" x2="1228.0" y2="61" stroke="darkblue" stroke-width="0.2"/>
+<line id="pitch d0" x1="60" y1="65" x2="1228.0" y2="65" stroke="darkblue" stroke-width="0.2"/>
+<line id="pitch c0" x1="60" y1="69" x2="1228.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+
+<!--
+As a visual aid, add vertical lines at each quaver beat: even ones (crotchets) solid, the ones in-between dotted.  In the X axis, the first solid line is at 60 (i.e. after the lead-in), the dotted line at 76.0, repeat this sequence every 32.0 (with a speed scale factor of 0.5).  In the Y axis all beat lines start at 13 (for the top margin) and end at (6.5 + 28) * 2 = 69.
+-->
+<line id="quaver beat 0" x1="60" y1="13" x2="60" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 1" x1="76.0" y1="13" x2="76.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 2" x1="92.0" y1="13" x2="92.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 3" x1="108.0" y1="13" x2="108.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 4" x1="124.0" y1="13" x2="124.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 5" x1="140.0" y1="13" x2="140.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 6" x1="156.0" y1="13" x2="156.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 7" x1="172.0" y1="13" x2="172.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 8" x1="188.0" y1="13" x2="188.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 9" x1="204.0" y1="13" x2="204.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 10" x1="220.0" y1="13" x2="220.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 11" x1="236.0" y1="13" x2="236.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 12" x1="252.0" y1="13" x2="252.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 13" x1="268.0" y1="13" x2="268.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 14" x1="284.0" y1="13" x2="284.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 15" x1="300.0" y1="13" x2="300.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 16" x1="316.0" y1="13" x2="316.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 17" x1="332.0" y1="13" x2="332.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 18" x1="348.0" y1="13" x2="348.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 19" x1="364.0" y1="13" x2="364.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 20" x1="380.0" y1="13" x2="380.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 21" x1="396.0" y1="13" x2="396.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 22" x1="412.0" y1="13" x2="412.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 23" x1="428.0" y1="13" x2="428.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 24" x1="444.0" y1="13" x2="444.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 25" x1="460.0" y1="13" x2="460.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 26" x1="476.0" y1="13" x2="476.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 27" x1="492.0" y1="13" x2="492.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 28" x1="508.0" y1="13" x2="508.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 29" x1="524.0" y1="13" x2="524.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 30" x1="540.0" y1="13" x2="540.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 31" x1="556.0" y1="13" x2="556.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 32" x1="572.0" y1="13" x2="572.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 33" x1="588.0" y1="13" x2="588.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 34" x1="604.0" y1="13" x2="604.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 35" x1="620.0" y1="13" x2="620.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 36" x1="636.0" y1="13" x2="636.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 37" x1="652.0" y1="13" x2="652.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 38" x1="668.0" y1="13" x2="668.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 39" x1="684.0" y1="13" x2="684.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 40" x1="700.0" y1="13" x2="700.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 41" x1="716.0" y1="13" x2="716.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 42" x1="732.0" y1="13" x2="732.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 43" x1="748.0" y1="13" x2="748.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 44" x1="764.0" y1="13" x2="764.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 45" x1="780.0" y1="13" x2="780.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 46" x1="796.0" y1="13" x2="796.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 47" x1="812.0" y1="13" x2="812.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 48" x1="828.0" y1="13" x2="828.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 49" x1="844.0" y1="13" x2="844.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 50" x1="860.0" y1="13" x2="860.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 51" x1="876.0" y1="13" x2="876.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 52" x1="892.0" y1="13" x2="892.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 53" x1="908.0" y1="13" x2="908.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 54" x1="924.0" y1="13" x2="924.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 55" x1="940.0" y1="13" x2="940.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 56" x1="956.0" y1="13" x2="956.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 57" x1="972.0" y1="13" x2="972.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 58" x1="988.0" y1="13" x2="988.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 59" x1="1004.0" y1="13" x2="1004.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 60" x1="1020.0" y1="13" x2="1020.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 61" x1="1036.0" y1="13" x2="1036.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 62" x1="1052.0" y1="13" x2="1052.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 63" x1="1068.0" y1="13" x2="1068.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 64" x1="1084.0" y1="13" x2="1084.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 65" x1="1100.0" y1="13" x2="1100.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 66" x1="1116.0" y1="13" x2="1116.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 67" x1="1132.0" y1="13" x2="1132.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 68" x1="1148.0" y1="13" x2="1148.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 69" x1="1164.0" y1="13" x2="1164.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 70" x1="1180.0" y1="13" x2="1180.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 71" x1="1196.0" y1="13" x2="1196.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+<line id="quaver beat 72" x1="1212.0" y1="13" x2="1212.0" y2="69" stroke="darkblue" stroke-width="0.2"/>
+<line id="quaver beat 73" x1="1228.0" y1="13" x2="1228.0" y2="69" stroke="darkblue" stroke-width="0.2" stroke-dasharray="16.0"/>
+
+<!--
+The original paper strip had a triangular pointer on the front, which is maintained here.  It is within the lead-in and is the same size as the notes on the original paper strip.
+-->
+<polygon id="arrow" points="30,41 34,39, 34,43" fill="darkblue"/>
+
+<!--
+It is useful to have a marker in the bottom left of the paper strip, after the lead-in, at the bottom of the Y axis and where the first note could occur in the X axis.  Make it a triangle of the same dimension as the diameter of the notes on the original paper strip, but narrower to avoid confusion with the forward-facing arrow.
+-->
+<polygon id="marker_bottom_left" points="59,80 61,80, 60,82" fill="darkblue"/>
+
+<!--
+And finally, the important part: the notes.  In the original paper strip notes were 2 mm in diameter; here they are 2 mm in diameter and therefore are 2 pixel(s) in radius.
+-->
+<circle id="note 0 c0" cx="60" cy="69" r="2" fill="black"/>
+<circle id="note 2 g0" cx="76" cy="53" r="2" fill="black"/>
+<circle id="note 4 e1" cx="92" cy="33" r="2" fill="black"/>
+<circle id="note 6 g0" cx="108" cy="53" r="2" fill="black"/>
+<circle id="note 8 c1" cx="124" cy="41" r="2" fill="black"/>
+<circle id="note 10 g0" cx="140" cy="53" r="2" fill="black"/>
+<circle id="note 13 a0" cx="148" cy="49" r="2" fill="black"/>
+<circle id="note 15 g0" cx="156" cy="53" r="2" fill="black"/>
+<circle id="note 16 c0" cx="156" cy="69" r="2" fill="black"/>
+<circle id="note 18 g0" cx="172" cy="53" r="2" fill="black"/>
+<circle id="note 20 f1" cx="188" cy="29" r="2" fill="black"/>
+<circle id="note 22 g0" cx="204" cy="53" r="2" fill="black"/>
+<circle id="note 24 d1" cx="220" cy="37" r="2" fill="black"/>
+<circle id="note 26 g0" cx="236" cy="53" r="2" fill="black"/>
+<circle id="note 29 a0" cx="244" cy="49" r="2" fill="black"/>
+<circle id="note 31 g0" cx="252" cy="53" r="2" fill="black"/>
+<circle id="note 32 c0" cx="252" cy="69" r="2" fill="black"/>
+<circle id="note 34 g0" cx="268" cy="53" r="2" fill="black"/>
+<circle id="note 36 e1" cx="284" cy="33" r="2" fill="black"/>
+<circle id="note 38 g0" cx="300" cy="53" r="2" fill="black"/>
+<circle id="note 40 c1" cx="316" cy="41" r="2" fill="black"/>
+<circle id="note 42 g0" cx="332" cy="53" r="2" fill="black"/>
+<circle id="note 45 a0" cx="340" cy="49" r="2" fill="black"/>
+<circle id="note 47 c0" cx="348" cy="69" r="2" fill="black"/>
+<circle id="note 48 g0" cx="348" cy="53" r="2" fill="black"/>
+<circle id="note 50 a0" cx="364" cy="49" r="2" fill="black"/>
+<circle id="note 52 f1" cx="380" cy="29" r="2" fill="black"/>
+<circle id="note 53 g0" cx="380" cy="53" r="2" fill="black"/>
+<circle id="note 56 d1" cx="412" cy="37" r="2" fill="black"/>
+<circle id="note 58 b0" cx="428" cy="45" r="2" fill="black"/>
+<circle id="note 60 c0" cx="444" cy="69" r="2" fill="black"/>
+<circle id="note 61 g0" cx="444" cy="53" r="2" fill="black"/>
+<circle id="note 63 g0" cx="460" cy="53" r="2" fill="black"/>
+<circle id="note 65 e1" cx="476" cy="33" r="2" fill="black"/>
+<circle id="note 67 g0" cx="492" cy="53" r="2" fill="black"/>
+<circle id="note 69 c1" cx="508" cy="41" r="2" fill="black"/>
+<circle id="note 71 g0" cx="524" cy="53" r="2" fill="black"/>
+<circle id="note 73 g0" cx="540" cy="53" r="2" fill="black"/>
+<circle id="note 74 b0" cx="540" cy="45" r="2" fill="black"/>
+<circle id="note 75 f1" cx="540" cy="29" r="2" fill="black"/>
+<circle id="note 76 g1" cx="540" cy="25" r="2" fill="black"/>
+<circle id="note 78 d1" cx="556" cy="37" r="2" fill="black"/>
+<circle id="note 80 e1" cx="572" cy="33" r="2" fill="black"/>
+<circle id="note 82 c1" cx="588" cy="41" r="2" fill="black"/>
+<circle id="note 84 d1" cx="604" cy="37" r="2" fill="black"/>
+<circle id="note 86 b0" cx="620" cy="45" r="2" fill="black"/>
+<circle id="note 88 g0" cx="636" cy="53" r="2" fill="black"/>
+<circle id="note 89 d1" cx="636" cy="37" r="2" fill="black"/>
+<circle id="note 90 g1" cx="636" cy="25" r="2" fill="black"/>
+<circle id="note 91 b1" cx="636" cy="17" r="2" fill="black"/>
+<circle id="note 93 e1" cx="652" cy="33" r="2" fill="black"/>
+<circle id="note 95 f1" cx="668" cy="29" r="2" fill="black"/>
+<circle id="note 96 a1" cx="668" cy="21" r="2" fill="black"/>
+<circle id="note 98 g0" cx="684" cy="53" r="2" fill="black"/>
+<circle id="note 100 a0" cx="700" cy="49" r="2" fill="black"/>
+<circle id="note 101 g1" cx="700" cy="25" r="2" fill="black"/>
+<circle id="note 103 b0" cx="716" cy="45" r="2" fill="black"/>
+<circle id="note 105 c0" cx="732" cy="69" r="2" fill="black"/>
+<circle id="note 106 c1" cx="732" cy="41" r="2" fill="black"/>
+<circle id="note 107 e1" cx="732" cy="33" r="2" fill="black"/>
+<circle id="note 109 g0" cx="748" cy="53" r="2" fill="black"/>
+<circle id="note 111 c1" cx="764" cy="41" r="2" fill="black"/>
+<circle id="note 113 d1" cx="780" cy="37" r="2" fill="black"/>
+<circle id="note 114 f1" cx="780" cy="29" r="2" fill="black"/>
+<circle id="note 116 e1" cx="796" cy="33" r="2" fill="black"/>
+<circle id="note 117 g1" cx="796" cy="25" r="2" fill="black"/>
+<circle id="note 119 c1" cx="812" cy="41" r="2" fill="black"/>
+<circle id="note 121 g0" cx="828" cy="53" r="2" fill="black"/>
+<circle id="note 122 g1" cx="828" cy="25" r="2" fill="black"/>
+<circle id="note 124 c1" cx="844" cy="41" r="2" fill="black"/>
+<circle id="note 126 e1" cx="860" cy="33" r="2" fill="black"/>
+<circle id="note 128 g0" cx="876" cy="53" r="2" fill="black"/>
+<circle id="note 130 c1" cx="892" cy="41" r="2" fill="black"/>
+<circle id="note 132 g0" cx="908" cy="53" r="2" fill="black"/>
+<circle id="note 134 g0" cx="924" cy="53" r="2" fill="black"/>
+<circle id="note 135 b0" cx="924" cy="45" r="2" fill="black"/>
+<circle id="note 137 d1" cx="940" cy="37" r="2" fill="black"/>
+<circle id="note 139 f1" cx="956" cy="29" r="2" fill="black"/>
+<circle id="note 141 g0" cx="972" cy="53" r="2" fill="black"/>
+<circle id="note 142 c1" cx="972" cy="41" r="2" fill="black"/>
+<circle id="note 144 d1" cx="988" cy="37" r="2" fill="black"/>
+<circle id="note 146 g0" cx="1004" cy="53" r="2" fill="black"/>
+<circle id="note 148 b0" cx="1020" cy="45" r="2" fill="black"/>
+<circle id="note 149 d1" cx="1020" cy="37" r="2" fill="black"/>
+<circle id="note 150 b1" cx="1020" cy="17" r="2" fill="black"/>
+<circle id="note 152 e1" cx="1036" cy="33" r="2" fill="black"/>
+<circle id="note 154 f1" cx="1052" cy="29" r="2" fill="black"/>
+<circle id="note 155 a1" cx="1052" cy="21" r="2" fill="black"/>
+<circle id="note 157 g0" cx="1068" cy="53" r="2" fill="black"/>
+<circle id="note 159 b0" cx="1084" cy="45" r="2" fill="black"/>
+<circle id="note 160 g1" cx="1084" cy="25" r="2" fill="black"/>
+<circle id="note 162 g0" cx="1100" cy="53" r="2" fill="black"/>
+<circle id="note 163 d1" cx="1100" cy="37" r="2" fill="black"/>
+<circle id="note 165 c0" cx="1116" cy="69" r="2" fill="black"/>
+<circle id="note 166 d1" cx="1116" cy="37" r="2" fill="black"/>
+<circle id="note 168 g0" cx="1132" cy="53" r="2" fill="black"/>
+<circle id="note 169 c1" cx="1132" cy="41" r="2" fill="black"/>
+<circle id="note 171 e1" cx="1148" cy="33" r="2" fill="black"/>
+<circle id="note 173 g0" cx="1164" cy="53" r="2" fill="black"/>
+<circle id="note 175 c0" cx="1180" cy="69" r="2" fill="black"/>
+
+</svg>
