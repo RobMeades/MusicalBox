@@ -488,7 +488,11 @@ esp_err_t tmc2209_start(int32_t address, int32_t pin_motor_enable)
 // Set the motor enable pin low to enable motors.
 esp_err_t  tmc2209_motor_enable(int32_t address)
 {
+#if !defined(CONFIG_STEPPER_NO_STEPPERS)
     return setMotorEnablePin(address, true);
+#else
+    return ESP_OK;
+#endif
 }
 
 // Set the motor enable pin high to disable motors.

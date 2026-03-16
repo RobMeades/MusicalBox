@@ -14,17 +14,17 @@
  * limitations under the License.
  */
 
- #ifndef _TMC2209_H_
- #define _TMC2209_H_
+#ifndef _TMC2209_H_
+#define _TMC2209_H_
  
- /** @file
-  * @brief The TMC2209 stepper motor driver API for the stepper motor
-  * application.
-  */
+/** @file
+ * @brief The TMC2209 stepper motor driver API for the stepper motor
+ * application.
+ */
  
- #ifdef __cplusplus
- extern "C" {
- #endif
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* ----------------------------------------------------------------
  * COMPILE-TIME MACROS

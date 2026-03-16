@@ -13,6 +13,32 @@ menu "Application Configuration"
             WiFi password (WPA or WPA2) for the example to use.
             Can be left blank if the network has no security set.
 
+    config STEPPER_PRODUCTION_MODE
+        bool "Enable production mode"
+        default n
+        help
+            If enabled, after OTA the device will enter production mode
+            and wait for commands from the server.
+
+    config STEPPER_PRODUCTION_HOST
+        string "Hostname/IP of the production host"
+        depends on STEPPER_PRODUCTION_MODE
+        default "10.10.3.1"
+        help
+            IP address or hostname of the Python control script
+
+    config STEPPER_PRODUCTION_PORT
+        int "The port number of the production host"
+        depends on STEPPER_PRODUCTION_MODE
+        default 5000
+        range 1024 65535
+
+    config STEPPER_PRODUCTION_LOG_PORT
+        int "The port number of the logging collector on the production host"
+        depends on STEPPER_PRODUCTION_MODE
+        default 5001
+        range 1024 65535
+
     config STEPPER_FIRMWARE_UPG_URL
         string "Firmware Upgrade URL"
         default "https://10.10.3.1:8070/stepper.bin"
@@ -67,11 +93,11 @@ menu "Application Configuration"
         help
             Pin connected to the TMC2209 DIAG pin
 
-    config STEPPER_PLINKY_PLONKY_REFERENCE_PIN
-        int "Plinky-plonky reference pin"
-        default -1
+    config STEPPER_STAND
+        bool "Be the stand"
+        default n
         help
-            Pin that goes low when the optical sensor is triggered
+            Set this to build for the stand (just a stepper, no sensor)
 
     config STEPPER_LIFT_LIMIT_PIN
         int "Lift limit pin"
@@ -85,6 +111,12 @@ menu "Application Configuration"
         help
             Pin that goes low when the lift is fully down
 
+    config STEPPER_PLINKY_PLONKY_REFERENCE_PIN
+        int "Plinky-plonky reference pin"
+        default -1
+        help
+            Pin that goes low when the optical sensor is triggered
+
     config STEPPER_DOOR_OPEN_PIN
         int "Door open pin"
         default -1
@@ -92,9 +124,13 @@ menu "Application Configuration"
             Pin that goes low when the door is fully open
 
     config STEPPER_NO_WIFI
-        int "Omit connecting to Wi-Fi (and therefore omit doing an OTA update)"
-        default 0
+        bool "Omit connecting to Wi-Fi (and therefore omit doing an OTA update)"
+        default n
         help
-            Set to greater-than-zero to omit making a WiFi connection
+            Set to omit making a WiFi connection
+
+    config STEPPER_NO_STEPPERS
+        bool "Do not enable steppers"
+        default n
 
 endmenu

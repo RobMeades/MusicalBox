@@ -130,7 +130,9 @@ static int32_t parse_firmware_header(const char *buffer, size_t buffer_len,
     memcpy(&new_app_info, 
            &buffer[sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t)], 
            sizeof(esp_app_desc_t));
-    
+
+
+    ESP_LOGI(TAG, "sizeof(esp_image_header_t): %d, sizeof(esp_image_segment_header_t) %d, sizeof(esp_app_desc_t) %d", sizeof(esp_image_header_t), sizeof(esp_image_segment_header_t), sizeof(esp_app_desc_t));
     ESP_LOGI(TAG, "New firmware version: %s.", new_app_info.version);
 
     esp_app_desc_t running_app_info;

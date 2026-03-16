@@ -32,6 +32,8 @@
 #include "esp_task_wdt.h"
 #include "esp_mac.h"
 
+
+#include "../../../protocol/protocol.h"
 #include "ota.h"
 #include "network.h"
 #include "tmc2209.h"
@@ -50,6 +52,10 @@
 // The addresss of the TMC2209 device we are going to us
 #define TMC2209_ADDRESS 0
 
+// The number of milliseconds to vTaskDelay() for in order to let the idle task
+// to feed its watchdog
+ #define WATCHDOG_FEED_TIME_MS 10
+
 // The sense resisitor wired to the BRA and BRB pins of the TMC2209,
 // the BigTreeTech board uses 100 milliOhms
 #define TMC2209_RSENSE_MOHM 110
@@ -59,9 +65,13 @@
 #define STEPPER_MOTOR_HOLD_CURRENT_PERCENT 20
 
 // The desired stepper motor velocity and current
-#if (defined (CONFIG_STEPPER_PLINKY_PLONKY_REFERENCE_PIN) && (CONFIG_STEPPER_PLINKY_PLONKY_REFERENCE_PIN >= 0))
+#if defined(CONFIG_STEPPER_STAND)
+    // The velocity and current for the stand
+#   define VELOCITY_MILLIHERTZ (1000 * 64 * 2)
+#   define STEPPER_MOTOR_CURRENT_MA 1000
+#elif (defined (CONFIG_STEPPER_PLINKY_PLONKY_REFERENCE_PIN) && (CONFIG_STEPPER_PLINKY_PLONKY_REFERENCE_PIN >= 0))
     // The velocity and current for plinky-plonky operation (double normal speed)
-#   define VELOCITY_MILLIHERTZ (1000 * 64 * 6 * 2)
+#   define VELOCITY_MILLIHERTZ (1000 * 64 * 7 * 2)
 #   define STEPPER_MOTOR_CURRENT_MA 1000
 #elif (defined (CONFIG_STEPPER_DOOR_OPEN_PIN) && (CONFIG_STEPPER_DOOR_OPEN_PIN >= 0))
     // The velocity and current for door operation
@@ -180,7 +190,7 @@ static void sensor_debounce_callback(void* arg)
     if (!gpio_get_level(pin)) {
         // The sensor is pulled low
         g_sensor_triggered_count++;
-        if (g_sensor_triggered_count >= DEBOUNCE_THRESHOLD) {
+        if (g_sensor_triggered_count > DEBOUNCE_THRESHOLD) {
             // For the unlikely case of a wrap
             g_sensor_triggered_count = DEBOUNCE_THRESHOLD;
         }
@@ -272,7 +282,7 @@ void app_main(void)
     }
 #endif
 
-#if !defined(CONFIG_STEPPER_NO_WIFI) || (CONFIG_STEPPER_NO_WIFI <= 0) 
+#if !defined(CONFIG_STEPPER_NO_WIFI) 
     // Initialise OTA
     if (err == ESP_OK) {
         err = ota_init();
@@ -288,7 +298,7 @@ void app_main(void)
         err = ota_update(CONFIG_STEPPER_FIRMWARE_UPG_URL, CONFIG_STEPPER_OTA_RECV_TIMEOUT_MS);
     }
 #else
-    ESP_LOGW(TAG, "CONFIG_STEPPER_NO_WIFI is greater than zero, not connecting to WiFi.");
+    ESP_LOGW(TAG, "CONFIG_STEPPER_NO_WIFI is defined, not connecting to WiFi.");
 #endif
 
     // Initialize the TMC2209 stepper motor driver interface
@@ -314,6 +324,15 @@ void app_main(void)
         }
 #endif
     }
+
+#if defined(CONFIG_STEPPER_NO_STEPPERS)
+    // Make sure the operator knows we're not gonna do nuffin
+    ESP_LOGW(TAG, "STEPPER_NO_STEPPERS is defined, steppers will not be enabled.");
+    for (size_t x= 0; x < 3; x++) {
+        flash_debug_led(DEBUG_LED_LONG_MS);
+        vTaskDelay(pdMS_TO_TICKS(DEBUG_LED_LONG_MS));
+    }
+#endif
 
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "Initialization complete.");
@@ -350,8 +369,18 @@ void app_main(void)
         esp_task_wdt_add(NULL);
 
         if (err == ESP_OK) {
+#if defined (CONFIG_STEPPER_STAND)
+            // We're operating the stand
+            ESP_LOGI(TAG, "STAND MODE");
+            ESP_LOGI(TAG, "Setting velocity.");
+            tmc2209_set_velocity(TMC2209_ADDRESS, VELOCITY_MILLIHERTZ);
+            size_t run_time_seconds = 5;
+            ESP_LOGI(TAG, "Running the motor for up to %d second(s)...", run_time_seconds);
+            tmc2209_motor_enable(TMC2209_ADDRESS);
+            vTaskDelay(pdMS_TO_TICKS(run_time_seconds * 1000));
+            ESP_LOGI(TAG, "Stopping.");
 
-#if defined (CONFIG_STEPPER_PLINKY_PLONKY_REFERENCE_PIN) && (CONFIG_STEPPER_PLINKY_PLONKY_REFERENCE_PIN >= 0)
+#elif defined (CONFIG_STEPPER_PLINKY_PLONKY_REFERENCE_PIN) && (CONFIG_STEPPER_PLINKY_PLONKY_REFERENCE_PIN >= 0)
             // We're operating the plinky-plonky
             ESP_LOGI(TAG, "PLINKY-PLONKY MODE");
             if (err == ESP_OK) {
@@ -382,7 +411,7 @@ void app_main(void)
                     if (is_at_reference()) {
                         // Wait a while after determining we are open before
                         // checking again, otherwise we will never move from open
-                        hysteresis_count = 200000;
+                        hysteresis_count = 1000 / WATCHDOG_FEED_TIME_MS / 2;
                     }
                     stop = false;
                     int64_t start_time = esp_timer_get_time();
@@ -399,7 +428,7 @@ void app_main(void)
                         }
                         esp_task_wdt_reset();
                         // Yield to let the idle task run and reset its watchdog
-                        vTaskDelay(pdMS_TO_TICKS(10));
+                        vTaskDelay(pdMS_TO_TICKS(WATCHDOG_FEED_TIME_MS));
                     }
                     tmc2209_motor_disable(TMC2209_ADDRESS);
                     ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));
@@ -460,8 +489,6 @@ void app_main(void)
                         hysteresis_count--;
                     }
                     esp_task_wdt_reset();
-                    // Yield to let the idle task run and reset its watchdog
-                    vTaskDelay(pdMS_TO_TICKS(10));
                 }
 
                 if (err == ESP_OK) {
@@ -541,7 +568,7 @@ void app_main(void)
                         if (is_open()) {
                             // Wait a while after determining we are open before
                             // checking again, otherwise we will never move from open
-                            hysteresis_count = 200000;
+                            hysteresis_count = 1000 / WATCHDOG_FEED_TIME_MS / 2;
                         }
                         stop = false;
                         int64_t start_time = esp_timer_get_time();
@@ -559,7 +586,7 @@ void app_main(void)
                             }
                             esp_task_wdt_reset();
                             // Yield to let the idle task run and reset its watchdog
-                            vTaskDelay(pdMS_TO_TICKS(10));
+                            vTaskDelay(pdMS_TO_TICKS(WATCHDOG_FEED_TIME_MS));
                         }
                         tmc2209_motor_disable(TMC2209_ADDRESS);
                         ESP_LOGI("INFO", "TSTEP %d.", tmc2209_get_tstep(TMC2209_ADDRESS));

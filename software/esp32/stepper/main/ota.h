@@ -14,20 +14,20 @@
  * limitations under the License.
  */
 
- #ifndef _OTA_H_
- #define _OTA_H_
+#ifndef _OTA_H_
+#define _OTA_H_
  
- /** @file
-  * @brief The OTA API for the stepper motor driver: makes an
-  * HTTP connection to a server and gets a file which is then
-  * written to non-volatile storage and the system restarted.
-  * Versions are checked and if all is good the download is
-  * not performed, everything is left alone.
-  */
+/** @file
+ * @brief The OTA API for the stepper motor driver: makes an
+ * HTTP connection to a server and gets a file which is then
+ * written to non-volatile storage and the system restarted.
+ * Versions are checked and if all is good the download is
+ * not performed, everything is left alone.
+ */
  
- #ifdef __cplusplus
- extern "C" {
- #endif
+#ifdef __cplusplus
+extern "C" {
+#endif
  
  /* ----------------------------------------------------------------
   * COMPILE-TIME MACROS
@@ -65,12 +65,12 @@ esp_err_t ota_init();
  */
 esp_err_t ota_update(const char *update_file_url, int32_t timeout_ms);
 
- #ifdef __cplusplus
- }
- #endif
+#ifdef __cplusplus
+}
+#endif
  
- /** @}*/
+/** @}*/
  
- #endif // _OTA_H_
+#endif // _OTA_H_
  
  // End of file

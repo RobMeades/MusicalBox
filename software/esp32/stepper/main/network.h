@@ -14,20 +14,20 @@
  * limitations under the License.
  */
 
- #ifndef _NETWORK_H_
- #define _NETWORK_H_
+#ifndef _NETWORK_H_
+#define _NETWORK_H_
  
- /** @file
-  * @brief The networking API for the stepper motor application, 
-  * mostly just initialisation.
-  */
+/** @file
+ * @brief The networking API for the stepper motor application, 
+ * mostly just initialisation.
+ */
  
- #ifdef __cplusplus
- extern "C" {
- #endif
+#ifdef __cplusplus
+extern "C" {
+#endif
 
- // Required for wifi_auth_mode_t.
- #include "esp_wifi_types.h"
+// Required for wifi_auth_mode_t.
+#include "esp_wifi_types.h"
 
  /* ----------------------------------------------------------------
   * COMPILE-TIME MACROS
@@ -79,14 +79,14 @@ void network_deinit();
  * @param buffer_len the number of bytes of storage at buffer.
  * @return           the number of bytes written to buffer.
  */
- size_t network_hostname_from_url(const char *url, char *buffer, size_t buffer_len);
+size_t network_hostname_from_url(const char *url, char *buffer, size_t buffer_len);
 
- #ifdef __cplusplus
- }
- #endif
+#ifdef __cplusplus
+}
+#endif
  
- /** @}*/
+/** @}*/
  
- #endif // _NETWORK_H_
+#endif // _NETWORK_H_
  
- // End of file
+// End of file

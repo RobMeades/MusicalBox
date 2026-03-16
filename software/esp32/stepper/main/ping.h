@@ -14,16 +14,16 @@
  * limitations under the License.
  */
 
- #ifndef _PING_H_
- #define _PING_H_
+#ifndef _PING_H_
+#define _PING_H_
  
  /** @file
   * @brief The ping API for the stepper motor application.
   */
  
- #ifdef __cplusplus
- extern "C" {
- #endif
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* ----------------------------------------------------------------
  * COMPILE-TIME MACROS
@@ -71,12 +71,12 @@ esp_err_t ping_start(const char *hostname, int32_t count,
                      ping_loss_cb_t ping_loss_cb,
                      void *ping_loss_cb_arg);
 
- #ifdef __cplusplus
- }
- #endif
+#ifdef __cplusplus
+}
+#endif
  
- /** @}*/
+/** @}*/
  
- #endif // _PING_H_
+#endif // _PING_H_
  
- // End of file
+// End of file
