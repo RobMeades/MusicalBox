@@ -40,10 +40,7 @@ class ProtocolDef:
     version: Optional[int] = None
     magic: Dict[str, int] = field(default_factory=dict)
     log_max_len: Optional[int] = None
-    state_stand: Dict[str, int] = field(default_factory=dict)
-    state_lift: Dict[str, int] = field(default_factory=dict)
-    state_plinky_plonky: Dict[str, int] = field(default_factory=dict)
-    state_door: Dict[str, int] = field(default_factory=dict)
+    states: Dict[str, int] = field(default_factory=dict)
     commands: Dict[str, int] = field(default_factory=dict)
     queries: Dict[str, int] = field(default_factory=dict)
     indications: Dict[str, int] = field(default_factory=dict)
@@ -207,14 +204,8 @@ class CHeaderParser:
             values = self._parse_enum_body(enum_body, enum_name)
             
             # Route to appropriate container
-            if enum_name == 'state_stand':
-                self.protocol.state_stand = values
-            elif enum_name == 'state_lift':
-                self.protocol.state_lift = values
-            elif enum_name == 'state_plinky_plonky':
-                self.protocol.state_plinky_plonky = values
-            elif enum_name == 'state_door':
-                self.protocol.state_door = values
+            if enum_name == 'state':
+                self.protocol.states = values
             elif enum_name == 'cmd':
                 self.protocol.commands = values
             elif enum_name == 'qry':
@@ -376,10 +367,7 @@ class PythonGenerator:
     def _add_enums(self):
         """Add enum classes"""
         enum_configs = [
-            ('StateStand', self.p.state_stand, 'Stand states'),
-            ('StateLift', self.p.state_lift, 'Lift states'),
-            ('StatePlinkyPlonky', self.p.state_plinky_plonky, 'Plinky-plonky states'),
-            ('StateDoor', self.p.state_door, 'Door states'),
+            ('State', self.p.states, 'States'),
             ('Cmd', self.p.commands, 'Command codes'),
             ('Qry', self.p.queries, 'Query codes'),
             ('Ind', self.p.indications, 'Indication/Event codes'),
@@ -644,10 +632,10 @@ The Python protocol module has been generated. Here's how to use it:
     # Create a CMD_STEPPER_TARGET_START command with all 4 parameters
     cmd = CmdMsg(
         command=Cmd.CMD_STEPPER_TARGET_START,
-        param_1=StateLift.STATE_LIFT_RISING,  # target state
+        param_1=State.STATE_LIFT_RISING,       # target state
         param_2=100,                           # velocity in TSTEPs
         param_3=500,                           # current in mA
-        param_4=5000                            # timeout in ms
+        param_4=5000                           # timeout in ms
     )
     
     # Send over socket
@@ -689,7 +677,7 @@ The Python protocol module has been generated. Here's how to use it:
     
     # Send CMD_STEPPER_TARGET_START
     cmd = CmdMsg(Cmd.CMD_STEPPER_TARGET_START, 
-                 StateLift.STATE_LIFT_RISING, 100, 500, 5000)
+                 State.STATE_LIFT_RISING, 100, 500, 5000)
     
     if send_message(sock, cmd):
         response = receive_message(sock, RspMsg, timeout=5.0)
@@ -727,10 +715,7 @@ def main():
     
     print(f"\nFound:")
     print(f"  - {len(protocol.magic)} magic bytes")
-    print(f"  - {len(protocol.state_stand)} stand states")
-    print(f"  - {len(protocol.state_lift)} lift states")
-    print(f"  - {len(protocol.state_plinky_plonky)} plinky-plonky states")
-    print(f"  - {len(protocol.state_door)} door states")
+    print(f"  - {len(protocol.states)} states")
     print(f"  - {len(protocol.commands)} commands")
     print(f"  - {len(protocol.queries)} queries")
     print(f"  - {len(protocol.indications)} indications")

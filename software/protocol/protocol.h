@@ -51,39 +51,40 @@ extern "C" {
  * TYPES
  * -------------------------------------------------------------- */
 
-// States for the stand.
+// The protocol, states first.
 typedef enum {
-    STATE_STAND_STOPPED,
-    STATE_STAND_ROTATING_CLOCKWISE,
-    STATE_STAND_ROTATING_ANTICLOCKWISE
-} state_stand_t;
+    STATE_NULL                                = 0x0000,
 
-// States for the lift.
-typedef enum {
-    STATE_LIFT_STOPPED_UNKNOWN,
-    STATE_LIFT_STOPPED_DOWN,
-    STATE_LIFT_STOPPED_UP,
-    STATE_LIFT_RISING,
-    STATE_LIFT_LOWERING
-} state_lift_t;
+    // States for the stand begin at 0x1000
+    STATE_STAND_BEGIN                         = 0x1000,
+    STATE_STAND_STOPPED                       = STATE_STAND_BEGIN,
+    STATE_STAND_ROTATING_CLOCKWISE            = STATE_STAND_BEGIN + 1,
+    STATE_STAND_ROTATING_ANTICLOCKWISE        = STATE_STAND_BEGIN + 2,
 
-// States for the plinky-plonky.
-typedef enum {
-    STATE_PLINKY_PLONKY_STOPPED_UNKNOWN,
-    STATE_PLINKY_PLONKY_STOPPED_AT_REFERENCE,
-    STATE_PLINKY_PLONKY_PLAYING
-} state_plinky_plonky_t;
+    // States for the lift begin at 0x2000
+    STATE_LIFT_BEGIN                          = 0x2000,
+    STATE_LIFT_STOPPED_UNKNOWN                = STATE_LIFT_BEGIN,
+    STATE_LIFT_STOPPED_DOWN                   = STATE_LIFT_BEGIN + 1,
+    STATE_LIFT_STOPPED_UP                     = STATE_LIFT_BEGIN + 2,
+    STATE_LIFT_RISING                         = STATE_LIFT_BEGIN + 3,
+    STATE_LIFT_LOWERING                       = STATE_LIFT_BEGIN + 4,
 
-// States for a door.
-typedef enum {
-    STATE_DOOR_STOPPED_UNKNOWN,
-    STATE_DOOR_STOPPED_CLOSED,
-    STATE_DOOR_STOPPED_OPEN,
-    STATE_DOOR_OPENING,
-    STATE_DOOR_CLOSING
-} state_door_t;
+    // States for the plinky-plonky begin at 0x3000
+    STATE_PLINKY_PLONKY_BEGIN                 = 0x3000,
+    STATE_PLINKY_PLONKY_STOPPED_UNKNOWN       = STATE_PLINKY_PLONKY_BEGIN,
+    STATE_PLINKY_PLONKY_STOPPED_AT_REFERENCE  = STATE_PLINKY_PLONKY_BEGIN + 1,
+    STATE_PLINKY_PLONKY_PLAYING               = STATE_PLINKY_PLONKY_BEGIN + 2,
 
-// The protocol, commands first.
+    // States for a door begin at 0x4000
+    STATE_DOOR_BEGIN                          = 0x4000,
+    STATE_DOOR_STOPPED_UNKNOWN                = STATE_DOOR_BEGIN,
+    STATE_DOOR_STOPPED_CLOSED                 = STATE_DOOR_BEGIN + 1,
+    STATE_DOOR_STOPPED_OPEN                   = STATE_DOOR_BEGIN + 2,
+    STATE_DOOR_OPENING                        = STATE_DOOR_BEGIN + 3,
+    STATE_DOOR_CLOSING                        = STATE_DOOR_BEGIN + 4
+} state_t;
+
+// Then commands.
 typedef enum {
     // System commands, start at 0
     CMD_SYSTEM_BEGIN               = 0x0000,
@@ -94,8 +95,7 @@ typedef enum {
     // CMD_LOG_STOP has no parameters
     CMD_LOG_STOP                   = CMD_SYSTEM_BEGIN + 2,
     // CMD_STEPPER_TARGET_START has three parameters:
-    // 1: the target state, taken from state_stand_t,
-    //    state_lift_t, state_plinky_plonky_t or state_door_t
+    // 1: the target state, taken from state_t,
     // 2: the velocity to travel at in TSTEPs
     // 3: the current to supply to the stepper motor in milliamps
     // 4: the timeout for the operation in milliseconds
@@ -136,8 +136,7 @@ typedef enum {
     QRY_SYSTEM_BEGIN                   = 0x0100,
     // QRY_STEPPER_STATE should cause the receiver to
     // return a rsp_msg_t with the value field containing
-    // its current state, from state_stand_t, state_lift_t
-    // state_plinky_plonky_t or state_door_t.
+    // its current state, from state_t.
     QRY_STEPPER_STATE                  = QRY_SYSTEM_BEGIN,
 
     // Queries to the stand (there are none)
