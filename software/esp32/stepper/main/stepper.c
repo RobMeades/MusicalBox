@@ -34,6 +34,7 @@
 
 
 #include "../../../protocol/protocol.h"
+#include "log.h"
 #include "ota.h"
 #include "network.h"
 #include "tmc2209.h"
@@ -297,6 +298,14 @@ void app_main(void)
     if (err == ESP_OK) {
         err = ota_update(CONFIG_STEPPER_FIRMWARE_UPG_URL, CONFIG_STEPPER_OTA_RECV_TIMEOUT_MS);
     }
+
+# if defined(CONFIG_STEPPER_PRODUCTION_MODE)
+    // Forward logging to the server
+    if (err == ESP_OK) {
+        err = log_init(CONFIG_STEPPER_PRODUCTION_HOST, CONFIG_STEPPER_PRODUCTION_LOG_PORT, LOG_INFO);
+    }
+# endif
+
 #else
     ESP_LOGW(TAG, "CONFIG_STEPPER_NO_WIFI is defined, not connecting to WiFi.");
 #endif
@@ -616,6 +625,7 @@ void app_main(void)
             tmc2209_motor_disable(TMC2209_ADDRESS);
         }
         ESP_LOGI(TAG, "DONE with motor stuff");
+        log_deinit();
         while(1) {
             vTaskDelay(pdMS_TO_TICKS(1000));
             esp_task_wdt_reset();
