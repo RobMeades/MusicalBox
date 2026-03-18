@@ -55,13 +55,13 @@ class ESP32LogServer:
         self.server.listen(5)
 
         print(f"ESP32 log server listening on port {self.port}")
-        print("[view messsages with \"journalctl -t esp32-device\"]")
+        print("[view messages with \"journalctl -t esp32-device\"]")
         self.running = True
 
         while self.running:
             try:
                 client, addr = self.server.accept()
-                print(f"ESP32 connected from {addr[0]}:{addr[1]}")
+                print(f"ESP32 connection from {addr[0]}:{addr[1]}")
                 self.handle_client(client, addr)
             except KeyboardInterrupt:
                 break

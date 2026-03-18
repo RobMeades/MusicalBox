@@ -157,3 +157,9 @@ If your \[ESP32\] connected devices are able to send their log messages to this 
   ...should show nice green things.  To view the log messages:
   
   `journalctl -t esp32-device`
+  
+- To make the service run at boot:
+
+  `sudo systemctl enable log_server`
+
+
