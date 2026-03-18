@@ -14,6 +14,8 @@ Since the Pi will lose connectivity to your Wi-Fi network (you do _not_ want an 
 
   - `sudo apt install python3-aiohttp`: which will be needed by `https_server.py`,
 
+  - `sudo apt install python3-systemd`: which will be needed by `log_server.py`,
+
   - `sudo apt install lrzsz`: this allows the `minicom` and `picocom` serial communications programs to perform file transfer,
   
   - `sudo apt install iptables iptables-persistent`: will be needed for MAC address filtering,
@@ -122,3 +124,42 @@ All of the ESP32 boards will want to make an HTTPS connection to the access poin
   ...then take the power down and up again; the motor attached to the ESP32 should rotate once everything has come up.
 
 - If you had hardened the Pi, put it back into read-only mode with the command `ro`.
+
+# Log Server Setup
+If your \[ESP32\] connected devices are able to send their log messages to this server over TCP, `log_server.py` can be run to listen for them and stuff the messages into the journal.  To get this script to run at boot, making sure port 5001 (the default port it will listen on) and then:
+
+- `sudo nano /lib/systemd/system/log_server.service` with the following contents:
+
+  ```
+  [Unit]
+  Description=Log Server
+  After=multi-user.target
+
+  [Service]
+  Type=simple
+  WorkingDirectory=/home/<your home directory name>/MusicalBox/software/pi
+  ExecStart=sudo python /home/<your home directory name>/MusicalBox/software/pi/log_server.py
+  KillSignal=SIGINT
+  Restart=on-failure
+
+  [Install]
+  WantedBy=multi-user.target
+  ```
+
+- Test that the service starts with:
+
+  `sudo systemctl start log_server`
+
+  ... and:
+
+  `sudo systemctl status log_server`
+
+  ...should show nice green things.  To view the log messages:
+  
+  `journalctl -t esp32-device`
+  
+- To make the service run at boot:
+
+  `sudo systemctl enable log_server`
+
+

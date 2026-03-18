@@ -21,51 +21,62 @@ PROTOCOL_MAGIC_RSP = 187
 
 LOG_MESSAGE_MAX_LEN = 256
 
+class StateStand(IntEnum):
+    """Stand states"""
+    STATE_STAND_STOPPED = 0
+    STATE_STAND_ROTATING_CLOCKWISE = 1
+    STATE_STAND_ROTATING_ANTICLOCKWISE = 2
+
+class StateLift(IntEnum):
+    """Lift states"""
+    STATE_LIFT_STOPPED_UNKNOWN = 0
+    STATE_LIFT_STOPPED_DOWN = 1
+    STATE_LIFT_STOPPED_UP = 2
+    STATE_LIFT_RISING = 3
+    STATE_LIFT_LOWERING = 4
+
+class StatePlinkyPlonky(IntEnum):
+    """Plinky-plonky states"""
+    STATE_PLINKY_PLONKY_STOPPED_UNKNOWN = 0
+    STATE_PLINKY_PLONKY_STOPPED_AT_REFERENCE = 1
+    STATE_PLINKY_PLONKY_PLAYING = 2
+
+class StateDoor(IntEnum):
+    """Door states"""
+    STATE_DOOR_STOPPED_UNKNOWN = 0
+    STATE_DOOR_STOPPED_CLOSED = 1
+    STATE_DOOR_STOPPED_OPEN = 2
+    STATE_DOOR_OPENING = 3
+    STATE_DOOR_CLOSING = 4
+
 class Cmd(IntEnum):
     """Command codes"""
-    SYSTEM_BEGIN = 0
-    REBOOT = 0
-    STAND_ROTATE_CLOCKWISE = 0
-    LIFT_UP = 0
-    PLINKY_PLONKY_PLAY_START = 0
-    DOOR_OPEN = 0
-    LOG_START = 1
-    LOG_STOP = 2
-    STAND_BEGIN = 4096
-    STAND_ROTATE_ANTICLOCKWISE = 4097
-    LIFT_BEGIN = 8192
-    LIFT_DOWN = 8193
-    PLINKY_PLONKY_BEGIN = 12288
-    PLINKY_PLONKY_PLAY_STOP = 12289
-    DOOR_BEGIN = 16384
-    DOOR_CLOSE = 16385
+    CMD_SYSTEM_BEGIN = 0
+    CMD_LOG_START = 1
+    CMD_LOG_STOP = 2
+    CMD_STEPPER_TARGET_START = 3
+    CMD_STAND_BEGIN = 4096
+    CMD_LIFT_BEGIN = 8192
+    CMD_PLINKY_PLONKY_BEGIN = 12288
+    CMD_DOOR_BEGIN = 16384
 
 class Qry(IntEnum):
     """Query codes"""
-    STAND_ROTATION_STATE = 0
-    LIFT_STATE = 0
-    PLINKY_PLONKY_STATE = 0
-    DOOR_STATE = 0
-    SYSTEM_BEGIN = 256
-    STAND_BEGIN = 4352
-    LIFT_BEGIN = 8448
-    LIFT_SENSOR_LIMIT = 8449
-    PLINKY_PLONKY_BEGIN = 12544
-    PLINKY_PLONKY_SENSOR_REFERENCE = 12545
-    DOOR_BEGIN = 16640
-    DOOR_SENSOR_OPEN = 16641
+    QRY_SYSTEM_BEGIN = 256
+    QRY_STAND_BEGIN = 4352
+    QRY_LIFT_BEGIN = 8448
+    QRY_LIFT_SENSOR_LIMIT = 8449
+    QRY_PLINKY_PLONKY_BEGIN = 12544
+    QRY_DOOR_BEGIN = 16640
 
 class Ind(IntEnum):
-    """Indication codes"""
-    LIFT_SENSOR_TRIGGERED_LIFT_DOWN = 0
-    PLINKY_PLONKY_SENSOR_TRIGGERED_REFERENCE = 0
-    DOOR_SENSOR_TRIGGERED_DOOR_OPEN = 0
-    SYSTEM_BEGIN = 512
-    STAND_BEGIN = 4608
-    LIFT_BEGIN = 8704
-    LIFT_SENSOR_TRIGGERED_LIFT_LIMIT = 8705
-    PLINKY_PLONKY_BEGIN = 12800
-    DOOR_BEGIN = 16896
+    """Indication/Event codes"""
+    IND_SYSTEM_BEGIN = 512
+    IND_STAND_BEGIN = 4608
+    IND_LIFT_BEGIN = 8704
+    IND_LIFT_SENSOR_TRIGGERED_LIFT_LIMIT = 8705
+    IND_PLINKY_PLONKY_BEGIN = 12800
+    IND_DOOR_BEGIN = 16896
 
 class LogLevel(IntEnum):
     """Log levels"""
@@ -82,6 +93,136 @@ class Status(IntEnum):
     STATUS_ERROR_INVALID_PARAM = 3
     STATUS_ERROR_BUSY = 4
     STATUS_ERROR_TIMEOUT = 5
+
+class CmdMsg:
+    """CmdMsg - packed binary message"""
+    FORMAT = "<BHIIII"
+    SIZE = 19
+    MAGIC = PROTOCOL_MAGIC_CMD
+
+    def __init__(self, command, param_1=0, param_2=0, param_3=0, param_4=0):
+        self.magic = self.MAGIC
+        self.command = command
+        self.param_1 = param_1
+        self.param_2 = param_2
+        self.param_3 = param_3
+        self.param_4 = param_4
+
+    def pack(self) -> bytes:
+        """Pack message into bytes for transmission"""
+        return struct.pack(self.FORMAT,
+                          self.magic, self.command, self.param_1, self.param_2, self.param_3, self.param_4)
+
+    @classmethod
+    def unpack(cls, data: bytes) -> "CmdMsg":
+        """Unpack bytes into a message instance"""
+        if len(data) != cls.SIZE:
+            raise ValueError(f"Invalid message size: got {len(data)}, expected {cls.SIZE}")
+        values = struct.unpack(cls.FORMAT, data)
+        magic = values[0]
+        if magic != cls.MAGIC:
+            raise ValueError(f"Invalid magic byte: got {magic:#x}, expected {cls.MAGIC:#x}")
+        return cls(*values[1:])
+
+    def __repr__(self):
+        return f"<CmdMsg command={self.command} param_1={self.param_1} param_2={self.param_2} param_3={self.param_3} param_4={self.param_4}>"
+
+class RspMsg:
+    """RspMsg - packed binary message"""
+    FORMAT = "<BHI"
+    SIZE = 7
+    MAGIC = PROTOCOL_MAGIC_RSP
+
+    def __init__(self, status, value=0):
+        self.magic = self.MAGIC
+        self.status = status
+        self.value = value
+
+    def pack(self) -> bytes:
+        """Pack message into bytes for transmission"""
+        return struct.pack(self.FORMAT,
+                          self.magic, self.status, self.value)
+
+    @classmethod
+    def unpack(cls, data: bytes) -> "RspMsg":
+        """Unpack bytes into a message instance"""
+        if len(data) != cls.SIZE:
+            raise ValueError(f"Invalid message size: got {len(data)}, expected {cls.SIZE}")
+        values = struct.unpack(cls.FORMAT, data)
+        magic = values[0]
+        if magic != cls.MAGIC:
+            raise ValueError(f"Invalid magic byte: got {magic:#x}, expected {cls.MAGIC:#x}")
+        return cls(*values[1:])
+
+    def __repr__(self):
+        return f"<RspMsg status={self.status} value={self.value}>"
+
+class IndMsg:
+    """IndMsg - packed binary message"""
+    FORMAT = "<BHI"
+    SIZE = 7
+    MAGIC = PROTOCOL_MAGIC_IND
+
+    def __init__(self, ind, value=0):
+        self.magic = self.MAGIC
+        self.ind = ind
+        self.value = value
+
+    def pack(self) -> bytes:
+        """Pack message into bytes for transmission"""
+        return struct.pack(self.FORMAT,
+                          self.magic, self.ind, self.value)
+
+    @classmethod
+    def unpack(cls, data: bytes) -> "IndMsg":
+        """Unpack bytes into a message instance"""
+        if len(data) != cls.SIZE:
+            raise ValueError(f"Invalid message size: got {len(data)}, expected {cls.SIZE}")
+        values = struct.unpack(cls.FORMAT, data)
+        magic = values[0]
+        if magic != cls.MAGIC:
+            raise ValueError(f"Invalid magic byte: got {magic:#x}, expected {cls.MAGIC:#x}")
+        return cls(*values[1:])
+
+    def __repr__(self):
+        return f"<IndMsg ind={self.ind} value={self.value}>"
+
+class LogMsg:
+    """LogMsg - packed binary message"""
+    FORMAT = f"<BB {LOG_MESSAGE_MAX_LEN}s"
+    SIZE = 2 + LOG_MESSAGE_MAX_LEN
+    MAGIC = PROTOCOL_MAGIC_LOG
+
+    def __init__(self, level, message=""):
+        self.magic = self.MAGIC
+        self.level = level
+        self.message = message
+
+    def pack(self) -> bytes:
+        """Pack message into bytes for transmission"""
+        # Truncate message if too long
+        msg_bytes = self.message.encode("utf-8")[:LOG_MESSAGE_MAX_LEN-1]
+        # Pad with null bytes to reach full size
+        padded = msg_bytes + b"\0" * (LOG_MESSAGE_MAX_LEN - len(msg_bytes))
+        return struct.pack(self.FORMAT,
+                          self.magic,
+                          self.level,
+                          padded)
+
+    @classmethod
+    def unpack(cls, data: bytes) -> "LogMsg":
+        """Unpack bytes into a message instance"""
+        if len(data) != cls.SIZE:
+            raise ValueError(f"Invalid message size: got {len(data)}, expected {cls.SIZE}")
+        magic, level, msg_bytes = struct.unpack(cls.FORMAT, data)
+        if magic != cls.MAGIC:
+            raise ValueError(f"Invalid magic byte: got {magic:#x}, expected {cls.MAGIC:#x}")
+        # Decode null-terminated string
+        message = msg_bytes.split(b"\0", 1)[0].decode("utf-8")
+        return cls(level, message)
+
+    def __repr__(self):
+        return f"<LogMsg level={self.level}, message=\"{self.message}\">"
 
 def send_message(sock: socket.socket, msg) -> bool:
     """Send a protocol message over a socket"""

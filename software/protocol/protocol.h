@@ -51,45 +51,79 @@ extern "C" {
  * TYPES
  * -------------------------------------------------------------- */
 
+// States for the stand.
+typedef enum {
+    STATE_STAND_STOPPED,
+    STATE_STAND_ROTATING_CLOCKWISE,
+    STATE_STAND_ROTATING_ANTICLOCKWISE
+} state_stand_t;
+
+// States for the lift.
+typedef enum {
+    STATE_LIFT_STOPPED_UNKNOWN,
+    STATE_LIFT_STOPPED_DOWN,
+    STATE_LIFT_STOPPED_UP,
+    STATE_LIFT_RISING,
+    STATE_LIFT_LOWERING
+} state_lift_t;
+
+// States for the plinky-plonky.
+typedef enum {
+    STATE_PLINKY_PLONKY_STOPPED_UNKNOWN,
+    STATE_PLINKY_PLONKY_STOPPED_AT_REFERENCE,
+    STATE_PLINKY_PLONKY_PLAYING
+} state_plinky_plonky_t;
+
+// States for a door.
+typedef enum {
+    STATE_DOOR_STOPPED_UNKNOWN,
+    STATE_DOOR_STOPPED_CLOSED,
+    STATE_DOOR_STOPPED_OPEN,
+    STATE_DOOR_OPENING,
+    STATE_DOOR_CLOSING
+} state_door_t;
+
 // The protocol, commands first.
 typedef enum {
     // System commands, start at 0
     CMD_SYSTEM_BEGIN               = 0x0000,
+    // CMD_REBOOT has no parameters
     CMD_REBOOT                     = CMD_SYSTEM_BEGIN,
+    // CMD_LOG_START has a single parameter which is log_level_t
     CMD_LOG_START                  = CMD_SYSTEM_BEGIN + 1,
+    // CMD_LOG_STOP has no parameters
     CMD_LOG_STOP                   = CMD_SYSTEM_BEGIN + 2,
+    // CMD_STEPPER_TARGET_START has three parameters:
+    // 1: the target state, taken from state_stand_t,
+    //    state_lift_t, state_plinky_plonky_t or state_door_t
+    // 2: the velocity to travel at in TSTEPs
+    // 3: the current to supply to the stepper motor in milliamps
+    // 4: the timeout for the operation in milliseconds
+    CMD_STEPPER_TARGET_START       = CMD_SYSTEM_BEGIN + 3,
 
     // System-level queries start at 0x0100
     // System-level indications start at 0x0200
 
-    // Commands for the stand
-    CMD_STAND_BEGIN                = 0x1000,
-    CMD_STAND_ROTATE_CLOCKWISE     = CMD_STAND_BEGIN,
-    CMD_STAND_ROTATE_ANTICLOCKWISE = CMD_STAND_BEGIN + 1,
+    // Commands to the stand (there are none)
+    CMD_STAND_BEGIN                 = 0x1000,
 
     // Queries to the stand start at 0x1100
     // Indications from the stand start at 0x1200
 
-    // Commands for the lift
+    // Commands to the lift (there are none)
     CMD_LIFT_BEGIN                  = 0x2000,
-    CMD_LIFT_UP                     = CMD_LIFT_BEGIN,
-    CMD_LIFT_DOWN                   = CMD_LIFT_BEGIN + 1,
 
     // Queries to the lift start at 0x2100
     // Indications from the lift start at 0x2200
 
-    // Commands for the plinky-plonky
+    // Commands to the plinky-plonky (there are none)
     CMD_PLINKY_PLONKY_BEGIN         = 0x3000,
-    CMD_PLINKY_PLONKY_PLAY_START    = CMD_PLINKY_PLONKY_BEGIN,
-    CMD_PLINKY_PLONKY_PLAY_STOP     = CMD_PLINKY_PLONKY_BEGIN + 1,
 
     // Queries to the plinky-plonky start at 0x3100
     // Indications from the plinky-plonky start at 0x3200
 
-    // Commands for a door
-    CMD_DOOR_BEGIN                  = 0x4000,
-    CMD_DOOR_OPEN                   = CMD_DOOR_BEGIN,
-    CMD_DOOR_CLOSE                  = CMD_DOOR_BEGIN + 1 
+    // Commands to a door (there are none)
+    CMD_DOOR_BEGIN                  = 0x4000
 
     // Queries to the door start at 0x4100
     // Indications from the door start at 0x4200
@@ -100,31 +134,52 @@ typedef enum {
 typedef enum {
     // System-level queries (there are none)
     QRY_SYSTEM_BEGIN                   = 0x0100,
+    // QRY_STEPPER_STATE should cause the receiver to
+    // return a rsp_msg_t with the value field containing
+    // its current state, from state_stand_t, state_lift_t
+    // state_plinky_plonky_t or state_door_t.
+    QRY_STEPPER_STATE                  = QRY_SYSTEM_BEGIN,
 
-    // Queries to the stand
+    // Queries to the stand (there are none)
     QRY_STAND_BEGIN                    = 0x1100,
-    QRY_STAND_ROTATION_STATE           = QRY_STAND_BEGIN,
 
     // Queries to the lift
     QRY_LIFT_BEGIN                     = 0x2100,
-    QRY_LIFT_STATE                     = QRY_LIFT_BEGIN,
+    // QRY_LIFT_SENSOR_DOWN should cause the receiver to
+    // return a rsp_msg_t with the value field containing
+    // 1 if the "down" sensor is currently triggered, else 0
+    QRY_LIFT_SENSOR_DOWN               = QRY_LIFT_BEGIN,
+    // QRY_LIFT_SENSOR_LIMIT should cause the receiver to
+    // return a rsp_msg_t with the value field containing
+    // 1 if the "limit" sensor is currently triggered, else 0
     QRY_LIFT_SENSOR_LIMIT              = QRY_LIFT_BEGIN + 1,
 
     // Queries to the plinky-plonky
     QRY_PLINKY_PLONKY_BEGIN            = 0x3100,
-    QRY_PLINKY_PLONKY_STATE            = QRY_PLINKY_PLONKY_BEGIN,
-    QRY_PLINKY_PLONKY_SENSOR_REFERENCE = QRY_PLINKY_PLONKY_BEGIN + 1,
+    // QRY_PLINKY_PLONKY_SENSOR_REFERENCE should cause the
+    // receiver to return a rsp_msg_t with the value field
+    // containing 1 if the "reference" sensor is currently
+    // triggered, else 0
+    QRY_PLINKY_PLONKY_SENSOR_REFERENCE = QRY_PLINKY_PLONKY_BEGIN,
 
     // Queries to a door
     QRY_DOOR_BEGIN                     = 0x4100,
-    QRY_DOOR_STATE                     = QRY_DOOR_BEGIN,
-    QRY_DOOR_SENSOR_OPEN               = QRY_DOOR_BEGIN + 1
+    // QRY_DOOR_SENSOR_OPEN should cause the receiver
+    // to return a rsp_msg_t with the value field
+    // containing 1 if the "open" sensor is currently
+    // triggered, else 0
+    QRY_DOOR_SENSOR_OPEN               = QRY_DOOR_BEGIN
 } qry_t;
 
 // Indications.
 typedef enum {
-    // System-level indications (there are none)
+    // System-level indications
     IND_SYSTEM_BEGIN                             = 0x0200,
+    // This is sent by a stepper when it has completed a
+    // CMD_STEPPER_TARGET_START, either successfully or not,
+    // the value field of the ind_msg_t indicating containing
+    // status_t (i.e. zero for success)
+    IND_STEPPER_TARGET_END                       = IND_SYSTEM_BEGIN,
 
     // Indications from the stand (there are none)
     IND_STAND_BEGIN                              = 0x1200,
@@ -153,7 +208,7 @@ typedef enum {
 
 // Status codes.
 typedef enum {
-    STATUS_OK                    = 0x0000,
+    STATUS_OK                    = 0,
     STATUS_ERROR_GENERIC         = 0x0001,
     STATUS_ERROR_INVALID_COMMAND = 0x0002,
     STATUS_ERROR_INVALID_PARAM   = 0x0003,
@@ -165,7 +220,10 @@ typedef enum {
 typedef struct __attribute__((packed)) {
     uint8_t magic;      // PROTOCOL_MAGIC_CMD
     uint16_t command;   // cmd_t
-    uint32_t param;     // Parameter (if any)
+    uint32_t param_1;   // Parameter 1
+    uint32_t param_2;   // Parameter 2
+    uint32_t param_3;   // Parameter 3
+    uint32_t param_4;   // Parameter 4
 } cmd_msg_t;
 
 typedef struct __attribute__((packed)) {
