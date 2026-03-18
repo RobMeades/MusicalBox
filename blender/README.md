@@ -7,7 +7,11 @@ This folder contains the Blender files and associated exported `.stl` files for 
 Throughout the convention is adopted that a component that must be printed multiple times has "xN" on the end, where "N" is the number of times, e.g. `bottom_esp32_mounting_plate_x7`.
 
 # `music_1.blend`
-In order to print cleanly, musical belts must be printed slowly and be cooled well: the fan must be kept at 100% and no speed must be greater than 30&nbsp;mm/s.  Though I would have liked to have printed this in ASA, I couldn't get it to stick well enough and so printed in PLA; highest resolution with 100% in-fill, no supports or brim required.
+During development, while printing in PLA, the musical belts needed to be printed slowly and be cooled well: the fan had be kept at 100% and no speed greater than 30&nbsp;mm/s was permitted.  Taking the same approach with ASA didn't work so well: though the belt did print it was brittle and delaminated almost immediately.  There may well be a good setting for ASA but I was out of time to experiment so I stuck with PLA: I could always print another belt if the first decayed.
+
+Print `Punched Strip 620 mm, musical_box_camberwick_green_final_0_5` (which means 620&nbsp;mm circumference, based on `musical_box_camberwick_green_final.txt` encoded at half speed) in  PLA at highest resolution with 100% in-fill, no supports or brim required.  Printing a cylinder makes quite a nice relaxing servo noise.
+
+After printing it is worth going over the holes with the hole punch that comes with the plinky-plonky mechanism to make sure they are clean and of good dimensions: to make this easier, I put a dab of white paint on the end of the black bit on the punch that does the cutting, otherwise it is difficult to see where it is when aligning with the holes and you might make things worse.
 
 # `musical_box.blend`
 There are three main components in `musical_box.blend`:
@@ -40,6 +44,8 @@ All parts should be printed in black ASA unless, 15% in-fill, unless otherwise s
 ### `bottom`
 The `bottom_rack` should be printed on a resin printer in a nice hard resin (e.g. [Siraya Tech Build](https://siraya.tech/pages/build-user-guide)); you will likely have to chop it into two semicircles to make it fit.  Print at fastest speed, no supports or pads required.  The rest of the parts are FDM prints.
 
+`bottom_decoration_rim`, `bottom_decoration_hex`, `bottom_decoration_slope_x6` and `bottom_decoration_x6` should be printed in natural ASA, fastest speed, 100% in-fill, no supports or brim apart from `bottom_decoration_x6` which will need supports on the build plate.  The remaining parts are printed in black ASA as usual.
+
 The large parts, `bottom_inner` and `bottom_outer` will need supports but may be printed at fastest speed.  The remaining parts will not need supports but should be printed at higher (e.g. 0.1&nbsp;mm) resolution with one exception: `bottom_inner_guide_tool` is not actually part of the musical box, it is just an alignment tool for use during assembly when gluing `bottom_inner_guide` into place, hence it can be printed in anything you like and at highest speed (no supports required).
 
 ### `door`
@@ -48,7 +54,11 @@ The large parts, `bottom_inner` and `bottom_outer` will need supports but may be
 ### `sides`
 `sides_column_x6` and `sides_brace` can be printed at fastest speed, the rest probably higher resolution if you can, but it is not critical.  You may wish to print an additional `sides_stepper_spindle_adapter_x6` to use when test fitting flatted brass bar.  None of the parts require supports.
 
+`sides_panel_outer` and `sides_panel_inner` I printed in PLA rather than ASA: this is rather thin and, like with the [music belts](../music) I couldn't make ASA behave; it would print but be slightly too "wiggly" in the vertical dimension to fit well on the musical box once printed.  Since the outer will be covered in the decoration of the musical box, and the inner will be inside under the doors, so neither should be too exposed to sunlight.  Print at fastest speed, 100% in-fill, no supports or brim required.
+
 ### `top`
+The parts `top_decoration_x6`, `top_decoration_slope_x6` and `top_decoration_rim` should be printed in natural ASA, fastest speed, 100% in-fill, no supports or brim aside from `top_decoration_x6`, which will need supports on the build plate.  The remaining parts are printed in black ASA as usual.
+
 The large part, `top`, should be printed at fastest speed, the rest at higher (e.g. 0.1&nbsp;mm) resolution if you can for a nicer finish.
 
 ### `stand`
