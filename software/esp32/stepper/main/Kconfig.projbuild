@@ -20,7 +20,7 @@ menu "Application Configuration"
             If enabled, after OTA the device will enter production mode
             and wait for commands from the server.
 
-    config STEPPER_PRODUCTION_HOST
+    config STEPPER_PRODUCTION_SERVER
         string "Hostname/IP of the production host"
         depends on STEPPER_PRODUCTION_MODE
         default "10.10.3.1"

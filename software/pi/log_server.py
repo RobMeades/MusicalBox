@@ -1,4 +1,4 @@
-!/usr/bin/env python
+#!/usr/bin/env python
 
 # Copyright 2026 Rob Meades
 #
@@ -22,6 +22,9 @@ import sys
 import os
 import logging
 import struct
+import threading
+import select
+import time
 from systemd import journal
 from pathlib import Path
 
@@ -40,6 +43,8 @@ class ESP32LogServer:
         self.port = port
         self.server = None
         self.running = False
+        self.clients = []  # Track active clients
+        self.clients_lock = threading.Lock()
 
         # Set up logging to journal
         self.logger = logging.getLogger('esp32_logger')
@@ -49,80 +54,149 @@ class ESP32LogServer:
 
     def start(self):
         """Start the log server"""
-        self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
         self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.server.bind(('0.0.0.0', self.port))
-        self.server.listen(5)
-
+        self.server.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        self.server.bind(('::', self.port))
+        self.server.listen(10)  # Increased backlog
+        
         print(f"ESP32 log server listening on port {self.port}")
         print("[view messages with \"journalctl -t esp32-device\"]")
         self.running = True
-
+        
+        # Start a thread to clean up dead connections
+        cleanup_thread = threading.Thread(target=self.cleanup_dead_clients, daemon=True)
+        cleanup_thread.start()
+        
         while self.running:
             try:
                 client, addr = self.server.accept()
                 print(f"ESP32 connection from {addr[0]}:{addr[1]}")
-                self.handle_client(client, addr)
+                
+                # Handle each client in a separate thread
+                client_thread = threading.Thread(
+                    target=self.handle_client,
+                    args=(client, addr),
+                    daemon=True  # Daemon threads exit when main thread exits
+                )
+                client_thread.start()
+                
+                # Track the client socket for cleanup
+                with self.clients_lock:
+                    self.clients.append({
+                        'socket': client,
+                        'thread': client_thread,
+                        'addr': addr
+                    })
+                    
+            except socket.timeout:
+                continue
             except KeyboardInterrupt:
                 break
             except Exception as e:
                 print(f"Error accepting connection: {e}")
-
+                time.sleep(1)  # Prevent tight loop on error
+    
     def handle_client(self, client, addr):
-        """Handle a connected ESP32 client"""
+        """Handle a connected ESP32 client in a separate thread"""
         buffer = b''
         expected_size = LogMsg.SIZE
-        client.settimeout(1.0)  # Add timeout to prevent blocking
+        client.settimeout(60.0)
+        # Enable TCP keepalive on the client socket
+        client.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)        
 
-        while self.running:
-            try:
-                data = client.recv(expected_size)
-                if not data:
-                    print(f"Client {addr[0]} disconnected")
+        try:
+            while self.running:
+                try:
+                    data = client.recv(1024)  # Read larger chunks
+                    if not data:
+                        print(f"Client {addr[0]} disconnected (normal)")
+                        break
+                    
+                    # Add to buffer
+                    buffer += data
+                    
+                    # Process complete messages
+                    while len(buffer) >= expected_size:
+                        msg_data = buffer[:expected_size]
+                        buffer = buffer[expected_size:]
+                        
+                        try:
+                            log_msg = LogMsg.unpack(msg_data)
+                            
+                            if log_msg.magic != LogMsg.MAGIC:
+                                print(f"WARNING: Invalid magic byte from {addr[0]}: {log_msg.magic:#x}")
+                                continue
+                            
+                            self.forward_to_journal(log_msg, addr)
+                            
+                        except struct.error as e:
+                            print(f"Struct unpacking error from {addr[0]}: {e}")
+                        except Exception as e:
+                            print(f"Error parsing log message from {addr[0]}: {e}")
+                            
+                except socket.timeout:
+                    continue
+                except ConnectionResetError:
+                    print(f"Client {addr[0]} reset connection (ESP32 rebooted)")
                     break
-
-                # Add to buffer
-                buffer += data
-
-                # Process complete messages
-                while len(buffer) >= expected_size:
-                    msg_data = buffer[:expected_size]
-                    buffer = buffer[expected_size:]
-
+                except Exception as e:
+                    print(f"Error receiving data from {addr[0]}: {e}")
+                    break
+        finally:
+            # Clean up this client
+            client.close()
+            with self.clients_lock:
+                self.clients = [c for c in self.clients if c['socket'] != client]
+            print(f"ESP32 disconnected from {addr[0]}")
+    
+    def cleanup_dead_clients(self):
+        """Background thread to clean up dead connections"""
+        while self.running:
+            time.sleep(5)
+            with self.clients_lock:
+                dead_clients = []
+                for client_info in self.clients:
+                    client = client_info['socket']
                     try:
-                        # Debug: print raw data
-                        #print(f"DEBUG: Received {len(msg_data)} bytes: {msg_data.hex()}")
-
-                        # Unpack the message using the protocol module
-                        log_msg = LogMsg.unpack(msg_data)
-
-                        # Verify it's a LogMsg object
-                        if log_msg.magic != LogMsg.MAGIC:
-                            print(f"WARNING: Invalid magic byte: {log_msg.magic:#x}")
-                            continue
-
-                        self.forward_to_journal(log_msg, addr)
-
-                    except struct.error as e:
-                        print(f"Struct unpacking error: {e}")
-                    except ValueError as e:
-                        print(f"Value error unpacking message: {e}")
-                    except Exception as e:
-                        print(f"Error parsing log message: {e}")
-                        print(f"Raw data (hex): {msg_data.hex()}")
-
-            except socket.timeout:
-                continue
-            except ConnectionResetError:
-                print(f"Client {addr[0]} reset connection")
-                break
-            except Exception as e:
-                print(f"Error receiving data: {e}")
-                break
-
-        client.close()
-        print(f"ESP32 disconnected from {addr[0]}")
-
+                        # Check if socket is still alive
+                        client.settimeout(0.1)
+                        data = client.recv(1, socket.MSG_PEEK | socket.MSG_DONTWAIT)
+                        if data == b'':  # Connection closed
+                            dead_clients.append(client_info)
+                    except (socket.error, BlockingIOError) as e:
+                        # Connection probably alive (would block) or dead
+                        if hasattr(e, 'errno') and e.errno not in [11, 35, 10035]:  # Would block
+                            dead_clients.append(client_info)
+                    except:
+                        dead_clients.append(client_info)
+                
+                # Remove dead clients
+                for dead in dead_clients:
+                    try:
+                        dead['socket'].close()
+                    except:
+                        pass
+                    self.clients.remove(dead)
+                    print(f"Cleaned up dead client {dead['addr'][0]}")
+    
+    def stop(self):
+        """Stop the server and all clients"""
+        self.running = False
+        
+        # Close all client connections
+        with self.clients_lock:
+            for client_info in self.clients:
+                try:
+                    client_info['socket'].close()
+                except:
+                    pass
+            self.clients.clear()
+        
+        # Close server socket
+        if self.server:
+            self.server.close()
+        print("Server stopped")
     def forward_to_journal(self, log_msg, addr):
         """Forward ESP32 log message to systemd journal with IP prepended"""
 
@@ -167,13 +241,7 @@ class ESP32LogServer:
 
         # Also print to console for debugging
         print(f"LOG: {enhanced_message}")
-
-    def stop(self):
-        """Stop the server"""
-        self.running = False
-        if self.server:
-            self.server.close()
-
+        
 if __name__ == "__main__":
     # Configure logging to also show debug info
     logging.basicConfig(level=logging.DEBUG)

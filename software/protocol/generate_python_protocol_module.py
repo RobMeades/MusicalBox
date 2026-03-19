@@ -425,6 +425,7 @@ class PythonGenerator:
         # Map struct names (without _t suffix) to message class names and magic constants
         message_types = [
             ('cmd_msg', 'CmdMsg', 'CMD', ['command', 'param_1', 'param_2', 'param_3', 'param_4']),
+            ('qry_msg', 'QryMsg', 'QRY', ['query']),
             ('rsp_msg', 'RspMsg', 'RSP', ['status', 'value']),
             ('ind_msg', 'IndMsg', 'IND', ['ind', 'value']),
             ('log_msg', 'LogMsg', 'LOG', ['level', 'message'])

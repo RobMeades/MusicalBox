@@ -40,9 +40,14 @@ extern "C" {
 
 // Magic bytes for different message types.
 #define PROTOCOL_MAGIC_CMD    0xAA
-#define PROTOCOL_MAGIC_RSP    0xBB
-#define PROTOCOL_MAGIC_IND    0xCC
-#define PROTOCOL_MAGIC_LOG    0xDD
+#define PROTOCOL_MAGIC_QRY    0xBB
+#define PROTOCOL_MAGIC_RSP    0xCC
+#define PROTOCOL_MAGIC_IND    0xDD
+#define PROTOCOL_MAGIC_LOG    0xEE
+
+// The maximum length of a message that can be sent to the ESP32
+// "module", i.e. the length of a cmd_t.
+#define PROTOCOL_ESP32_MAX_RX_LEN (sizeof(cmd_t))
 
 // The maximum length of a log message (including the null terminator).
 #define LOG_MESSAGE_MAX_LEN   256
@@ -224,6 +229,11 @@ typedef struct __attribute__((packed)) {
     uint32_t param_3;   // Parameter 3
     uint32_t param_4;   // Parameter 4
 } cmd_msg_t;
+
+typedef struct __attribute__((packed)) {
+    uint8_t magic;      // PROTOCOL_MAGIC_QRY
+    uint16_t query;     // qry_t
+} qry_msg_t;
 
 typedef struct __attribute__((packed)) {
     uint8_t magic;      // PROTOCOL_MAGIC_RSP

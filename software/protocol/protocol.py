@@ -15,9 +15,10 @@ PROTOCOL_VERSION = 1
 
 # Magic bytes
 PROTOCOL_MAGIC_CMD = 170
-PROTOCOL_MAGIC_IND = 204
-PROTOCOL_MAGIC_LOG = 221
-PROTOCOL_MAGIC_RSP = 187
+PROTOCOL_MAGIC_IND = 221
+PROTOCOL_MAGIC_LOG = 238
+PROTOCOL_MAGIC_QRY = 187
+PROTOCOL_MAGIC_RSP = 204
 
 LOG_MESSAGE_MAX_LEN = 256
 
@@ -118,6 +119,35 @@ class CmdMsg:
 
     def __repr__(self):
         return f"<CmdMsg command={self.command} param_1={self.param_1} param_2={self.param_2} param_3={self.param_3} param_4={self.param_4}>"
+
+class QryMsg:
+    """QryMsg - packed binary message"""
+    FORMAT = "<BH"
+    SIZE = 3
+    MAGIC = PROTOCOL_MAGIC_QRY
+
+    def __init__(self, query):
+        self.magic = self.MAGIC
+        self.query = query
+
+    def pack(self) -> bytes:
+        """Pack message into bytes for transmission"""
+        return struct.pack(self.FORMAT,
+                          self.magic, self.query)
+
+    @classmethod
+    def unpack(cls, data: bytes) -> "QryMsg":
+        """Unpack bytes into a message instance"""
+        if len(data) != cls.SIZE:
+            raise ValueError(f"Invalid message size: got {len(data)}, expected {cls.SIZE}")
+        values = struct.unpack(cls.FORMAT, data)
+        magic = values[0]
+        if magic != cls.MAGIC:
+            raise ValueError(f"Invalid magic byte: got {magic:#x}, expected {cls.MAGIC:#x}")
+        return cls(*values[1:])
+
+    def __repr__(self):
+        return f"<QryMsg query={self.query}>"
 
 class RspMsg:
     """RspMsg - packed binary message"""

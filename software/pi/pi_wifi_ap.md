@@ -95,7 +95,7 @@ All of the ESP32 boards will want to make an HTTPS connection to the access poin
   [Service]
   Type=simple
   WorkingDirectory=/home/<your home directory name>/fw/
-  ExecStart=sudo python /home/<your home directory name>/fw/https_server.py
+  ExecStart=python /home/<your home directory name>/fw/https_server.py
   KillSignal=SIGINT
   Restart=on-failure
 
@@ -138,7 +138,7 @@ If your \[ESP32\] connected devices are able to send their log messages to this 
   [Service]
   Type=simple
   WorkingDirectory=/home/<your home directory name>/MusicalBox/software/pi
-  ExecStart=sudo python /home/<your home directory name>/MusicalBox/software/pi/log_server.py
+  ExecStart=python /home/<your home directory name>/MusicalBox/software/pi/log_server.py
   KillSignal=SIGINT
   Restart=on-failure
 

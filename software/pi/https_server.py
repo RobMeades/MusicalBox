@@ -318,7 +318,7 @@ if __name__ == "__main__":
     parser.add_argument('base_dir', nargs='?', default=BASE_DIR_DEFAULT, help=("directory to serve files from, default "
                                                                               f"'{BASE_DIR_DEFAULT}'."))
     parser.add_argument('-p', type=int, default=LISTENING_PORT_DEFAULT, help=("the listening port, default "
-                                                                             f"{LISTENING_PORT_DEFAULT:04}."))
+                                                                             f"{LISTENING_PORT_DEFAULT}."))
     parser.add_argument('-d', action='store_true', help=("switch to differentiated mode: in this"
                                                          " mode different files will be served"
                                                          " based on the source IP address of the"

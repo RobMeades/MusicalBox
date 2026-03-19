@@ -88,7 +88,7 @@ static void print_datagram(const char *prefix, uint8_t *p, int32_t length)
     for (int32_t x = 0; (x < length) && (x * 2 < sizeof(buffer)); x++) {
         sprintf(&(buffer[x * 2]), "%02x", *(p + x));
     }
-    ESP_LOGI(TAG, "%s0x%s (%d byte(s)).", prefix, buffer, length);
+    ESP_LOGD(TAG, "%s0x%s (%d byte(s)).", prefix, buffer, length);
 }
 
  // Clean-up on error or completion
@@ -125,7 +125,7 @@ static uint32_t endian_convert(uint32_t data)
     // Transmission order is data bytes 3, 2, 1, 0,
     // so big-endian: reverse if we are little-endian
     if (is_little_endian()) {
-        output = 0; 
+        output = 0;
         for (uint32_t x = 0; x < sizeof(data); x++) {
             output |= ((uint32_t) *(((uint8_t *) &data) + x)) << (24 - (8 * x));
         }
@@ -166,7 +166,7 @@ static esp_err_t write(int32_t address, int32_t reg, uint32_t *data)
     esp_err_t err = -ESP_ERR_INVALID_ARG;
     uint64_t datagram = 0;
 
-    ESP_LOGI(TAG, "Sending %d byte(s) of data %sto address %d, register 0x%02x.",
+    ESP_LOGD(TAG, "Sending %d byte(s) of data %sto address %d, register 0x%02x.",
              (data != NULL ? sizeof(*data) : 0),
              (data == NULL ? "(read access request) " : ""), address, reg);
     if ((g_uart >= 0) && (address < 4) && (reg < 128)) {
@@ -201,7 +201,7 @@ static esp_err_t write(int32_t address, int32_t reg, uint32_t *data)
             p = (uint8_t *) &read;
             int32_t read_count = uart_read_bytes((uart_port_t) g_uart, p,
                                                   index,
-                                                  pdMS_TO_TICKS(100)); 
+                                                  pdMS_TO_TICKS(100));
             if (read_count > 0) {
                 if (memcmp(&read, &datagram, index != 0)) {
                     print_datagram("Expected to read back what we sent but"
@@ -272,7 +272,7 @@ static esp_err_t read(int32_t address, int32_t reg, uint32_t *data)
 static esp_err_t write_reg(int32_t address, int32_t reg,
                            uint32_t data)
 {
-    esp_err_t err = write(address, reg, &data); 
+    esp_err_t err = write(address, reg, &data);
 
     if (err == sizeof(data)) {
         err = ESP_OK;
@@ -322,12 +322,12 @@ static esp_err_t set_stallguard(int32_t address,
         }
     }
     if (err == ESP_OK) {
-        // Write to the TCOOLTHRS register (0x14) 
-        err = write_reg(address, 0x14, tcoolthrs); 
+        // Write to the TCOOLTHRS register (0x14)
+        err = write_reg(address, 0x14, tcoolthrs);
     }
     if (err == ESP_OK) {
-        // Write to the SGTHRS register (0x40) 
-        err = write_reg(address, 0x40, sgthrs); 
+        // Write to the SGTHRS register (0x40)
+        err = write_reg(address, 0x40, sgthrs);
     }
 
     return err;
@@ -411,7 +411,7 @@ esp_err_t tmc2209_init(int32_t uart, int32_t pin_txd, int32_t pin_rxd,
             .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
             .source_clk = UART_SCLK_DEFAULT,
         };
-    
+
         // Assume no enable pins
         for (size_t x = 0; x < sizeof(g_pin_motor_enable) / sizeof(g_pin_motor_enable[0]); x++) {
             g_pin_motor_enable[x] = -1;
@@ -484,7 +484,7 @@ esp_err_t tmc2209_start(int32_t address, int32_t pin_motor_enable)
 
     return err;
 }
- 
+
 // Set the motor enable pin low to enable motors.
 esp_err_t  tmc2209_motor_enable(int32_t address)
 {
@@ -560,7 +560,7 @@ esp_err_t tmc2209_get_position(int32_t address)
             data &= 0xf0ffffff;
             data |= ((uint32_t) index) << 24;
             // Write it back again
-            err = write_reg(address, 0x6c, data); 
+            err = write_reg(address, 0x6c, data);
             if (err == ESP_OK) {
                 // Return the value set
                 err = g_microstep_table[index];
@@ -582,7 +582,7 @@ esp_err_t tmc2209_get_microstep_resolution(int32_t address)
         // The MRES value is in bits 24 to 27
         data = (data >> 24) & 0x0f;
         // Use this as an index into g_microstep_table
-        // to get the power-of-two value 
+        // to get the power-of-two value
         if (data < sizeof(g_microstep_table) / sizeof(g_microstep_table[0])) {
             err = g_microstep_table[data];
         }
@@ -593,7 +593,7 @@ esp_err_t tmc2209_get_microstep_resolution(int32_t address)
 
 // Set the current supplied to the stepper motor.
 esp_err_t tmc2209_set_current(int32_t address,
-                              uint32_t r_sense_mohm, 
+                              uint32_t r_sense_mohm,
                               uint32_t run_current_ma,
                               uint32_t hold_current_percent)
 {
@@ -647,7 +647,7 @@ esp_err_t tmc2209_set_current(int32_t address,
             err = read_reg(address, 0);
             if (err >= 0) {
                 // Set bit 0, I_scale_analog, to 0
-                err =  write_reg(address, 0, err & 0xfffffffe); 
+                err =  write_reg(address, 0, err & 0xfffffffe);
             }
         }
 
@@ -667,7 +667,7 @@ esp_err_t tmc2209_unset_current(int32_t address)
     esp_err_t err = read_reg(address, 0);
     if (err >= 0) {
         // Set bit 0, I_scale_analog, to 1
-        err =  write_reg(address, 0, err | 0x01); 
+        err =  write_reg(address, 0, err | 0x01);
     }
 
     return err;
@@ -680,7 +680,7 @@ esp_err_t tmc2209_set_velocity(int32_t address,
 {
     // Write to the VACTUAL register (0x22)
     milliHertz /= VACTUAL_TO_MILLIHERTZ;
-    return write_reg(address, 0x22, milliHertz); 
+    return write_reg(address, 0x22, milliHertz);
 }
 
 // Set the StealthChop threshold.
@@ -688,7 +688,7 @@ esp_err_t tmc2209_set_stealth_chop_threshold(int32_t address,
                                              int32_t threshold)
 {
     // Write to the TPWMTHRESH register (0x13)
-    return write_reg(address, 0x13, threshold); 
+    return write_reg(address, 0x13, threshold);
 }
 
 // Configure the chopper in a TMC2209.
@@ -703,8 +703,8 @@ esp_err_t tmc2209_stop_that_bloody_racket(int32_t address,
     if (err >= 0) {
         // TOFF is in bits 0 to 3, HSTRT in bits 4 to 6,
         // HEND in bits 7 to 10 and TBL in bits 15 and 16
-        err = (err & 0xfffe7800) | (toff & 0x0f) | (((uint32_t) (hstrt & 0x07)) << 4) | (((uint32_t) (hend & 0x0f)) << 7) | (((uint32_t) (tbl & 0x03)) << 15); 
-        err =  write_reg(address, 0x6c, err); 
+        err = (err & 0xfffe7800) | (toff & 0x0f) | (((uint32_t) (hstrt & 0x07)) << 4) | (((uint32_t) (hend & 0x0f)) << 7) | (((uint32_t) (tbl & 0x03)) << 15);
+        err =  write_reg(address, 0x6c, err);
     }
 
     return err;
@@ -756,7 +756,7 @@ esp_err_t tmc2209_init_stallguard(int32_t address,
             }
         }
     }
-    
+
     return err;
 }
 
@@ -785,7 +785,7 @@ esp_err_t tmc2209_set_coolstep(int32_t address, uint8_t seimin,
         // SEMIN is in bits 0 to 3, SEMAX bits 8 to 11, SEIMIN bit 15
         err = (err & 0xffffe0f0) | (semax & 0x0f) | (((uint32_t) (semin & 0x0f)) << 8) | (((uint32_t) (seimin & 0x01)) << 15);
         // Write the new value back
-        err =  write_reg(address, 0x42, err); 
+        err =  write_reg(address, 0x42, err);
     }
 
     return err;

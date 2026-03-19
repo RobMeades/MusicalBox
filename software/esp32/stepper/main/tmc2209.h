@@ -16,12 +16,12 @@
 
 #ifndef _TMC2209_H_
 #define _TMC2209_H_
- 
+
 /** @file
  * @brief The TMC2209 stepper motor driver API for the stepper motor
  * application.
  */
- 
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -46,7 +46,7 @@ extern "C" {
 #define TMC2209_REG_GCONF_DEFAULTS 0x000001c1
 
 
-/** Masks for the line states of each pin of a TMC2209, 
+/** Masks for the line states of each pin of a TMC2209,
  * use on the return value of tmc2209_read_lines().
  */
 #define TMC2209_LINE_MASK_ENN       0x0001
@@ -88,7 +88,7 @@ esp_err_t tmc2209_init(int32_t uart, int32_t pin_txd, int32_t pin_rxd,
  * @param address          the address of the device, range 0 to 3.
  * @param pin_motor_enable GPIO pin connected to the EN pin of a TMC2209
  *                         that must be pulled low to enable the motor;
- *                         use -1 if there is no such pin. 
+ *                         use -1 if there is no such pin.
  * @return                 ESP_OK on success, else a negative value from esp_err_t.
  */
 esp_err_t tmc2209_start(int32_t address, int32_t pin_motor_enable);
@@ -212,7 +212,7 @@ esp_err_t tmc2209_get_microstep_resolution(int32_t address);
  *                             error code from esp_err_t.
  */
 esp_err_t tmc2209_set_current(int32_t address,
-                              uint32_t r_sense_mohm, 
+                              uint32_t r_sense_mohm,
                               uint32_t run_current_ma,
                               uint32_t hold_current_percent);
 
@@ -237,7 +237,12 @@ esp_err_t tmc2209_unset_current(int32_t address);
  * MOVING IMMEDIATELY.
  *
  * Note: for operation at low speeds you might want to
- * look at tmc2209_set_stealth_chop_threshold();
+ * look at tmc2209_set_stealth_chop_threshold().
+ *
+ * Note: not sure if this function is really useful,left
+ * here for backwards compatibility but everything in
+ * stepper land is really done in terms of time and so
+ * TSTEP becomes the more natural unit, see
  *
  * @param address    the address of the device, range 0 to 3.
  * @param milliHertz the step rate in millihertz, i.e.
@@ -273,7 +278,7 @@ esp_err_t tmc2209_set_stealth_chop_threshold(int32_t address,
                                              int32_t threshold);
 
 /** Configure the chopper in a TMC2209, usually to stop
- * a motor sounding like a cricket in SpreadCycle mode, 
+ * a motor sounding like a cricket in SpreadCycle mode,
  * see section 5.5 of the data sheet for an explanation
  * of the parameters.
  *
@@ -384,7 +389,7 @@ esp_err_t tmc2209_init_stallguard(int32_t address,
  *                    is the same as the TSTEP value in the
  *                    chip, meaning that stallguard should
  *                    always be active.  Use a value of
- *                    UINT32_MAX to disable StallGuard 
+ *                    UINT32_MAX to disable StallGuard
  * @param sgthrs      the value of SGTHRS to set in the
  *                    TMC2209.
  * @return            zero on success, else negative error
