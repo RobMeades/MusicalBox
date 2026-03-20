@@ -28,19 +28,23 @@ class State(IntEnum):
     STATE_STAND_BEGIN = 4096
     STATE_STAND_ROTATING_CLOCKWISE = 4097
     STATE_STAND_ROTATING_ANTICLOCKWISE = 4098
+    STATE_STAND_END = 8191
     STATE_LIFT_BEGIN = 8192
     STATE_LIFT_STOPPED_DOWN = 8193
     STATE_LIFT_STOPPED_UP = 8194
     STATE_LIFT_RISING = 8195
     STATE_LIFT_LOWERING = 8196
+    STATE_LIFT_END = 12287
     STATE_PLINKY_PLONKY_BEGIN = 12288
     STATE_PLINKY_PLONKY_STOPPED_AT_REFERENCE = 12289
     STATE_PLINKY_PLONKY_PLAYING = 12290
+    STATE_PLINKY_PLONKY_END = 16383
     STATE_DOOR_BEGIN = 16384
     STATE_DOOR_STOPPED_CLOSED = 16385
     STATE_DOOR_STOPPED_OPEN = 16386
     STATE_DOOR_OPENING = 16387
     STATE_DOOR_CLOSING = 16388
+    STATE_DOOR_END = 20479
 
 class Cmd(IntEnum):
     """Command codes"""
@@ -48,28 +52,43 @@ class Cmd(IntEnum):
     CMD_LOG_START = 1
     CMD_LOG_STOP = 2
     CMD_STEPPER_TARGET_START = 3
+    CMD_SYSTEM_END = 255
     CMD_STAND_BEGIN = 4096
+    CMD_STAND_END = 4351
     CMD_LIFT_BEGIN = 8192
+    CMD_LIFT_END = 8447
     CMD_PLINKY_PLONKY_BEGIN = 12288
+    CMD_PLINKY_PLONKY_END = 12543
     CMD_DOOR_BEGIN = 16384
+    CMD_DOOR_END = 16639
 
 class Qry(IntEnum):
     """Query codes"""
     QRY_SYSTEM_BEGIN = 256
+    QRY_SYSTEM_END = 511
     QRY_STAND_BEGIN = 4352
+    QRY_STAND_END = 4607
     QRY_LIFT_BEGIN = 8448
     QRY_LIFT_SENSOR_LIMIT = 8449
+    QRY_LIFT_END = 8703
     QRY_PLINKY_PLONKY_BEGIN = 12544
+    QRY_PLINKY_PLONKY_END = 12799
     QRY_DOOR_BEGIN = 16640
+    QRY_DOOR_END = 16895
 
 class Ind(IntEnum):
     """Indication/Event codes"""
     IND_SYSTEM_BEGIN = 512
+    IND_SYSTEM_END = 767
     IND_STAND_BEGIN = 4608
+    IND_STAND_END = 4863
     IND_LIFT_BEGIN = 8704
     IND_LIFT_SENSOR_TRIGGERED_LIFT_LIMIT = 8705
+    IND_LIFT_END = 8959
     IND_PLINKY_PLONKY_BEGIN = 12800
+    IND_PLINKY_PLONKY_END = 13055
     IND_DOOR_BEGIN = 16896
+    IND_DOOR_END = 17151
 
 class LogLevel(IntEnum):
     """Log levels"""
@@ -83,19 +102,23 @@ class Status(IntEnum):
     STATUS_OK = 0
     STATUS_ERROR_GENERIC = 1
     STATUS_ERROR_INVALID_COMMAND = 2
-    STATUS_ERROR_INVALID_PARAM = 3
-    STATUS_ERROR_BUSY = 4
-    STATUS_ERROR_TIMEOUT = 5
+    STATUS_ERROR_UNHANDLED_COMMAND = 3
+    STATUS_ERROR_INVALID_PARAM = 4
+    STATUS_ERROR_BUSY = 5
+    STATUS_ERROR_TIMEOUT = 6
+    STATUS_ERROR_HARDWARE = 7
+    STATUS_ERROR_ABORT = 8
 
 class CmdMsg:
     """CmdMsg - packed binary message"""
-    FORMAT = "<BHIIII"
-    SIZE = 19
+    FORMAT = "<BHIIIII"
+    SIZE = 23
     MAGIC = PROTOCOL_MAGIC_CMD
 
-    def __init__(self, command, param_1=0, param_2=0, param_3=0, param_4=0):
+    def __init__(self, command, reference=0, param_1=0, param_2=0, param_3=0, param_4=0):
         self.magic = self.MAGIC
         self.command = command
+        self.reference = reference
         self.param_1 = param_1
         self.param_2 = param_2
         self.param_3 = param_3
@@ -104,7 +127,7 @@ class CmdMsg:
     def pack(self) -> bytes:
         """Pack message into bytes for transmission"""
         return struct.pack(self.FORMAT,
-                          self.magic, self.command, self.param_1, self.param_2, self.param_3, self.param_4)
+                          self.magic, self.command, self.reference, self.param_1, self.param_2, self.param_3, self.param_4)
 
     @classmethod
     def unpack(cls, data: bytes) -> "CmdMsg":
@@ -118,7 +141,7 @@ class CmdMsg:
         return cls(*values[1:])
 
     def __repr__(self):
-        return f"<CmdMsg command={self.command} param_1={self.param_1} param_2={self.param_2} param_3={self.param_3} param_4={self.param_4}>"
+        return f"<CmdMsg command={self.command} reference={self.reference} param_1={self.param_1} param_2={self.param_2} param_3={self.param_3} param_4={self.param_4}>"
 
 class QryMsg:
     """QryMsg - packed binary message"""
@@ -151,19 +174,20 @@ class QryMsg:
 
 class RspMsg:
     """RspMsg - packed binary message"""
-    FORMAT = "<BHI"
-    SIZE = 7
+    FORMAT = "<BIHI"
+    SIZE = 11
     MAGIC = PROTOCOL_MAGIC_RSP
 
-    def __init__(self, status, value=0):
+    def __init__(self, status, reference=0, value=0):
         self.magic = self.MAGIC
         self.status = status
+        self.reference = reference
         self.value = value
 
     def pack(self) -> bytes:
         """Pack message into bytes for transmission"""
         return struct.pack(self.FORMAT,
-                          self.magic, self.status, self.value)
+                          self.magic, self.status, self.reference, self.value)
 
     @classmethod
     def unpack(cls, data: bytes) -> "RspMsg":
@@ -177,7 +201,7 @@ class RspMsg:
         return cls(*values[1:])
 
     def __repr__(self):
-        return f"<RspMsg status={self.status} value={self.value}>"
+        return f"<RspMsg status={self.status} reference={self.reference} value={self.value}>"
 
 class IndMsg:
     """IndMsg - packed binary message"""

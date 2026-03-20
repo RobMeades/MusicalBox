@@ -254,6 +254,18 @@ esp_err_t tmc2209_unset_current(int32_t address);
 esp_err_t tmc2209_set_velocity(int32_t address,
                                int32_t milliHertz);
 
+/** Get the velocity of the stepper motor attached to a
+ * TMC2209 device.
+ *
+ * @param address    the address of the device, range 0 to 3.
+ * @param milliHertz a place to put the step rate in millihertz;
+ *                   may be NULL.
+ * @return           zero on success else negative error
+ *                   code from esp_err_t.
+ */
+esp_err_t tmc2209_get_velocity(int32_t address,
+                               int32_t *milliHertz);
+
 /** Set the TSTEP value below which the TMC2209 will leave
  * leave SpreadCycle mode and switch to StealthChop mode,
  * which is quiter and more efficient at faster speeds.

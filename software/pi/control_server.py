@@ -20,7 +20,21 @@ import queue
 import threading
 import time
 import argparse
+from time import sleep
 from datetime import datetime
+from typing import Optional, Union, Dict, List, Tuple
+
+# Add the protocol directory to Python path
+# Get the directory where THIS script is located
+import sys
+from pathlib import Path
+script_dir = Path(__file__).resolve().parent
+
+# Navigate up to the common directory where protocol.h and protocol.py live
+protocol_dir = script_dir.parent / 'protocol'
+sys.path.insert(0, str(protocol_dir))
+
+import protocol
 
 # The default listening port
 LISTENING_PORT_DEFAULT = 5000
@@ -29,19 +43,19 @@ class ESP32Manager:
     def __init__(self):
         # Your known devices (fixed IPs)
         self.devices = {
-            "10.10.3.10": {"name": "stand", "connected": False, "sock": None},
-            "10.10.3.20": {"name": "lift", "connected": False, "sock": None},
-            "10.10.3.30": {"name": "plinky-plonky", "connected": False, "sock": None},
-            "10.10.3.40": {"name": "door 0", "connected": False, "sock": None},
-            "10.10.3.41": {"name": "door 1", "connected": False, "sock": None},
-            "10.10.3.42": {"name": "door 2", "connected": False, "sock": None},
-            "10.10.3.43": {"name": "door 3", "connected": False, "sock": None},
-            "10.10.3.44": {"name": "door 4", "connected": False, "sock": None},
-            "10.10.3.45": {"name": "door 5", "connected": False, "sock": None},
+            "10.10.3.10": {"name": "stand", "init": protocol.Cmd.CMD_STAND_INIT, "connected": False, "sock": None, "init_done": False},
+            #"10.10.3.20": {"name": "lift", "init": protocol.Cmd.CMD_LIFT_INIT, "connected": False, "sock": None, "init_done": False},
+            "10.10.3.30": {"name": "plinky-plonky", "init": protocol.Cmd.CMD_PLINKY_PLONKY_INIT, "connected": False, "sock": None, "init_done": False},
+            "10.10.3.40": {"name": "door 0", "init": protocol.Cmd.CMD_DOOR_INIT, "connected": False, "sock": None, "init_done": False},
+            "10.10.3.41": {"name": "door 1", "init": protocol.Cmd.CMD_DOOR_INIT, "connected": False, "sock": None, "init_done": False},
+            "10.10.3.42": {"name": "door 2", "init": protocol.Cmd.CMD_DOOR_INIT, "connected": False, "sock": None, "init_done": False},
+            "10.10.3.43": {"name": "door 3", "init": protocol.Cmd.CMD_DOOR_INIT, "connected": False, "sock": None, "init_done": False},
+            "10.10.3.44": {"name": "door 4", "init": protocol.Cmd.CMD_DOOR_INIT, "connected": False, "sock": None, "init_done": False},
+            "10.10.3.45": {"name": "door 5", "init": protocol.Cmd.CMD_DOOR_INIT, "connected": False, "sock": None, "init_done": False},
         }
         
-        # Single unified queue for incoming messages
-        # Each message is (ip, data)
+        # Single unified queue for incoming messages (RspMsg and IndMsg only)
+        # Each message is (ip, msg_obj)
         self.incoming_queue = queue.Queue()
         
         # Socket management
@@ -51,6 +65,12 @@ class ESP32Manager:
         # For select() polling
         self.socket_list = []
         self.device_sockets = {}  # Map socket -> ip
+        
+        # Partial message buffer for each socket (in case we get fragmented reads)
+        self.socket_buffers = {}  # Map socket -> bytes
+        
+        # Track pending init responses
+        self.pending_inits = {}  # Map socket -> (ip, reference, timestamp)
         
     def start(self, port=5000):
         """Start the server and wait for connections"""
@@ -78,6 +98,50 @@ class ESP32Manager:
         
         return receiver_thread
     
+    def _parse_message(self, data: bytes) -> Optional[Union[protocol.RspMsg, protocol.IndMsg]]:
+        """
+        Parse incoming data based on magic byte
+        Returns the appropriate message object or None if invalid
+        """
+        if len(data) < 1:
+            return None
+            
+        magic = data[0]
+        
+        try:
+            if magic == protocol.PROTOCOL_MAGIC_RSP:
+                return protocol.RspMsg.unpack(data)
+            elif magic == protocol.PROTOCOL_MAGIC_IND:
+                return protocol.IndMsg.unpack(data)
+            else:
+                # Log messages and unknown magics are ignored
+                return None
+        except Exception as e:
+            print(f"Error parsing message: {e}")
+            return None
+    
+    def _handle_init_response(self, sock, ip, msg):
+        """Handle response to init command"""
+        if sock not in self.pending_inits:
+            return False
+        
+        expected_ref, timestamp = self.pending_inits[sock]
+        
+        # Check if this response matches our pending init
+        if msg.reference == expected_ref:
+            if msg.status == protocol.Status.STATUS_OK:
+                print(f"✓ {self.devices[ip]['name']} initialized successfully")
+                self.devices[ip]["init_done"] = True
+            else:
+                print(f"✗ {self.devices[ip]['name']} initialization failed with status 0x{msg.status:04x}")
+                # You might want to retry here
+            
+            # Remove from pending
+            del self.pending_inits[sock]
+            return True
+        
+        return False
+    
     def _receiver_loop(self):
         """Main loop using select() to handle all sockets"""
         while self.running:
@@ -95,9 +159,22 @@ class ESP32Manager:
                             # Known device - accept
                             self.devices[client_ip]["connected"] = True
                             self.devices[client_ip]["sock"] = client_sock
+                            self.devices[client_ip]["init_done"] = False  # Reset init flag
                             self.socket_list.append(client_sock)
                             self.device_sockets[client_sock] = client_ip
+                            self.socket_buffers[client_sock] = b""  # Initialize buffer
                             print(f"{self.devices[client_ip]['name']} connected from {client_ip}")
+                            
+                            # Send init command
+                            reference = 1  # Use reference 1 for init commands
+                            cmd = protocol.CmdMsg(self.devices[client_ip]["init"], reference, 0, 0, 0, 0)
+                            
+                            # Track this pending init
+                            self.pending_inits[client_sock] = (reference, time.time())
+                            
+                            # Send the command
+                            protocol.send_message(client_sock, cmd)
+                            print(f"  Sent init command (ref={reference}) to {self.devices[client_ip]['name']}")
                         else:
                             # Unknown device - reject
                             print(f"Rejected unknown device from {client_ip}")
@@ -109,13 +186,56 @@ class ESP32Manager:
                         try:
                             data = sock.recv(1024)
                             if data:
-                                # Put in queue with device identifier
-                                self.incoming_queue.put((ip, data))
+                                print(f"{ip}: received {len(data)} byte(s): ", end='')
+                                for item in data:
+                                    print(f"{item:02x}", end='')
+                                print("")
+                                # Add to buffer and try to parse complete messages
+                                self.socket_buffers[sock] += data
+                                
+                                # Try to parse messages from buffer
+                                while True:
+                                    if len(self.socket_buffers[sock]) < 1:
+                                        break
+                                    
+                                    # Determine expected message size from magic byte
+                                    magic = self.socket_buffers[sock][0]
+                                    msg_size = None
+                                    
+                                    if magic == protocol.PROTOCOL_MAGIC_RSP:
+                                        msg_size = protocol.RspMsg.SIZE
+                                    elif magic == protocol.PROTOCOL_MAGIC_IND:
+                                        msg_size = protocol.IndMsg.SIZE
+                                    else:
+                                        # Unknown magic - discard first byte and continue
+                                        # (silently ignores log messages and invalid data)
+                                        self.socket_buffers[sock] = self.socket_buffers[sock][1:]
+                                        continue
+                                    
+                                    # Check if we have a complete message
+                                    if len(self.socket_buffers[sock]) >= msg_size:
+                                        # Extract and parse message
+                                        msg_data = self.socket_buffers[sock][:msg_size]
+                                        self.socket_buffers[sock] = self.socket_buffers[sock][msg_size:]
+                                        
+                                        msg = self._parse_message(msg_data)
+                                        if msg:
+                                            # Check if this is a response to a pending init
+                                            if sock in self.pending_inits and isinstance(msg, protocol.RspMsg):
+                                                if self._handle_init_response(sock, ip, msg):
+                                                    # This response was consumed by init handling
+                                                    continue
+                                            
+                                            # Not an init response, add to queue
+                                            self.incoming_queue.put((ip, msg))
+                                    else:
+                                        # Wait for more data
+                                        break
                             else:
                                 # Connection closed
                                 self._handle_disconnect(sock, ip)
-                        except:
-                            # Error reading
+                        except Exception as e:
+                            print(f"Error reading from {ip}: {e}")
                             self._handle_disconnect(sock, ip)
                 
                 # Handle exceptional conditions
@@ -123,6 +243,19 @@ class ESP32Manager:
                     if sock in self.device_sockets:
                         ip = self.device_sockets[sock]
                         self._handle_disconnect(sock, ip)
+                
+                # Clean up stale pending inits (timeout after 5 seconds)
+                current_time = time.time()
+                stale_socks = []
+                for sock, (ref, timestamp) in self.pending_inits.items():
+                    if current_time - timestamp > 5.0:
+                        ip = self.device_sockets.get(sock, "unknown")
+                        print(f"Warning: Init response timeout for {ip}")
+                        stale_socks.append(sock)
+                
+                for sock in stale_socks:
+                    if sock in self.pending_inits:
+                        del self.pending_inits[sock]
                         
             except Exception as e:
                 print(f"Error in receiver loop: {e}")
@@ -133,54 +266,92 @@ class ESP32Manager:
         if ip in self.devices:
             self.devices[ip]["connected"] = False
             self.devices[ip]["sock"] = None
+            self.devices[ip]["init_done"] = False
             print(f"{self.devices[ip]['name']} disconnected")
+        
+        # Clean up pending init
+        if sock in self.pending_inits:
+            del self.pending_inits[sock]
         
         if sock in self.socket_list:
             self.socket_list.remove(sock)
         if sock in self.device_sockets:
             del self.device_sockets[sock]
+        if sock in self.socket_buffers:
+            del self.socket_buffers[sock]
         
         try:
             sock.close()
         except:
             pass
     
-    def send_to_device(self, ip, data):
+    def send_command(self, ip: str, command: protocol.CmdMsg) -> bool:
         """
-        Send data to a specific device
-        Returns True if sent, False if device not connected
+        Send a command message to a specific device
         """
         if ip in self.devices and self.devices[ip]["connected"]:
+            # Check if device is initialized (unless this IS the init command)
+            if command.command not in [info["init"] for info in self.devices.values()]:
+                if not self.devices[ip]["init_done"]:
+                    print(f"Warning: {self.devices[ip]['name']} not yet initialized")
+                    return False
+            
             try:
                 sock = self.devices[ip]["sock"]
-                sock.send(data)
-                return True
-            except:
-                print(f"Failed to send to {self.devices[ip]['name']}")
+                return protocol.send_message(sock, command)
+            except Exception as e:
+                print(f"Failed to send to {self.devices[ip]['name']}: {e}")
                 return False
         return False
     
-    def send_to_all(self, data):
-        """Send data to all connected devices"""
+    def send_query(self, ip: str, query: protocol.QryMsg) -> bool:
+        """
+        Send a query message to a specific device
+        """
+        if ip in self.devices and self.devices[ip]["connected"]:
+            # Check if device is initialized
+            if not self.devices[ip]["init_done"]:
+                print(f"Warning: {self.devices[ip]['name']} not yet initialized")
+                return False
+            
+            try:
+                sock = self.devices[ip]["sock"]
+                return protocol.send_message(sock, query)
+            except Exception as e:
+                print(f"Failed to send to {self.devices[ip]['name']}: {e}")
+                return False
+        return False
+    
+    def send_command_to_all(self, command: protocol.CmdMsg) -> Dict[str, bool]:
+        """Send command to all connected devices"""
         results = {}
         for ip, info in self.devices.items():
-            if info["connected"]:
-                results[ip] = self.send_to_device(ip, data)
+            if info["connected"] and info["init_done"]:
+                results[ip] = self.send_command(ip, command)
+        return results
+    
+    def send_query_to_all(self, query: protocol.QryMsg) -> Dict[str, bool]:
+        """Send query to all connected devices"""
+        results = {}
+        for ip, info in self.devices.items():
+            if info["connected"] and info["init_done"]:
+                results[ip] = self.send_query(ip, query)
         return results
     
     def wait_for_all_devices(self, timeout=None):
         """
-        Block until all known devices are connected
-        Returns True if all connected, False if timeout
+        Block until all known devices are connected AND initialized
+        Returns True if all connected and initialized, False if timeout
         """
-        print("Waiting for all devices to connect...")
+        print("Waiting for all devices to connect and initialize...")
         start_time = time.time()
         
         while self.running:
             all_connected = all(info["connected"] for info in self.devices.values())
+            all_initialized = all(info["init_done"] for info in self.devices.values())
             
-            if all_connected:
-                print("All devices connected!")
+            if all_connected and all_initialized:
+                print("All devices connected and initialized!")
                 return True
             
             if timeout and (time.time() - start_time) > timeout:
@@ -196,6 +367,10 @@ class ESP32Manager:
     def is_device_connected(self, ip):
         """Check if a specific device is connected"""
         return ip in self.devices and self.devices[ip]["connected"]
+    
+    def is_device_initialized(self, ip):
+        """Check if a specific device is initialized"""
+        return ip in self.devices and self.devices[ip]["init_done"]
     
     def stop(self):
         """Clean shutdown"""
@@ -220,29 +395,71 @@ def main(port):
     receiver_thread = manager.start(port)
     
     try:
-        # Wait for all devices to connect (no timeout)
+        # Wait for all devices to connect AND initialize
         if manager.wait_for_all_devices():
             
-            # All devices connected - do your main logic here
+            # All devices ready - do your main logic here
             print("=== ALL SYSTEMS GO ===")
             
-            # Example: Process incoming messages
+            # Example: Send a command to all devices
+            #cmd = protocol.CmdMsg(
+            #    command=protocol.Cmd.CMD_LOG_START,
+            #    reference=2,
+            #    param_1=0,
+            #    param_2=0,
+            #    param_3=0,
+            #    param_4=0
+            #)
+            #print("Sending CMD_LOG_START to all devices")
+            #manager.send_command_to_all(cmd)
+
+            # Example: Send a command to a specific device
+            print(f"Sending CMD_STEPPER_TARGET_START to 10.10.3.10 with target state STATE_STAND_ROTATING_ANTICLOCKWISE, velocity (1000 * 64 * 2), current 1000 m
+A, timeout 5000 ms.")
+            cmd = protocol.CmdMsg(protocol.Cmd.CMD_STEPPER_TARGET_START, 2, protocol.State.STATE_STAND_ROTATING_ANTICLOCKWISE, (1000 * 64 * 2), 1000, 5000)
+            manager.send_command("10.10.3.10", cmd)
+
+            # Example: Send a command to a specific device
+            #print(f"Sending CMD_STEPPER_TARGET_START to 10.10.3.30 with target state STATE_PLINKY_PLONKY_STOPPED_AT_REFERENCE, velocity (1000 * 64 * 7 * 2), cur
+rent 1000 mA, timeout 30000 ms.")
+            #cmd = protocol.CmdMsg(protocol.Cmd.CMD_STEPPER_TARGET_START, 2, protocol.State.STATE_PLINKY_PLONKY_STOPPED_AT_REFERENCE, (1000 * 64 * 7 * 2), 1000, 
+30000)
+            #manager.send_command("10.10.3.30", cmd)
+
+            # Example: Send a query to a specific device
+            print(f"Sending QRY_DOOR_SENSOR_OPEN to 10.10.3.41 devices.")
+            qry = protocol.QryMsg(query=protocol.Qry.QRY_DOOR_SENSOR_OPEN)
+            manager.send_query("10.10.3.41", qry)
+            
+            # Process incoming messages
             while True:
                 try:
                     # Check for incoming messages (non-blocking)
-                    ip, data = manager.incoming_queue.get_nowait()
+                    ip, msg = manager.incoming_queue.get_nowait()
                     device_name = manager.devices[ip]["name"]
-                    print(f"From {device_name}: {data}")
                     
-                    # Echo back as example
-                    manager.send_to_device(ip, b"ACK")
+                    if isinstance(msg, protocol.RspMsg):
+                        print(f"Response from {device_name} with reference {msg.reference}: status=0x{msg.status:x}, value={msg.value}")
+                        
+                        # Handle different status codes
+                        if msg.status == protocol.Status.STATUS_OK:
+                            print(f"  Command with reference {msg.reference} succeeded")
+                        else:
+                            print(f"  Command with reference {msg.reference} failed with status 0x{msg.status:04x}")
+                    
+                    elif isinstance(msg, protocol.IndMsg):
+                        print(f"Indication from {device_name}: ind=0x{msg.ind:04x}, value=0x{msg.value:x}")
+                        
+                        # Handle different indications
+                        if msg.ind == protocol.Ind.IND_LIFT_SENSOR_TRIGGERED_LIFT_LIMIT:
+                            print("  Lift limit switch triggered!")
                     
                 except queue.Empty:
                     # No messages, do other work
                     time.sleep(0.1)
                     
         else:
-            print("Failed to connect all devices")
+            print("Failed to connect and initialize all devices")
             
     except KeyboardInterrupt:
         print("\nShutting down...")

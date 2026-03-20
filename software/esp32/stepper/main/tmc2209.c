@@ -683,6 +683,28 @@ esp_err_t tmc2209_set_velocity(int32_t address,
     return write_reg(address, 0x22, milliHertz);
 }
 
+// Get the velocity of the stepper motor attached to a
+// TMC2209 device.
+esp_err_t tmc2209_get_velocity(int32_t address,
+                               int32_t *milliHertz)
+{
+    uint32_t data = 0;
+    // Read the VACTUAL register (0x22)
+    esp_err_t err = read(address, 0x22, &data);
+    if (err == sizeof(data)) {
+        if (milliHertz != NULL) {
+            *milliHertz = (int32_t) data * VACTUAL_TO_MILLIHERTZ;
+        }
+        err = ESP_OK;
+    } else {
+        if (err >= 0) {
+            err = -ESP_ERR_INVALID_RESPONSE;
+        }
+    }
+
+    return err;
+}
+
 // Set the StealthChop threshold.
 esp_err_t tmc2209_set_stealth_chop_threshold(int32_t address,
                                              int32_t threshold)

@@ -130,68 +130,74 @@ class CHeaderParser:
                     if entry and not entry.startswith('//'):
                         entries.append(entry)
         
-        # First pass: collect all base values (like CMD_SYSTEM_BEGIN = 0x0000)
+        # First pass: collect all explicitly defined hex/decimal values
         for entry in entries:
             if '=' in entry:
                 name, expr = entry.split('=', 1)
                 name = name.strip()
                 expr = expr.strip()
                 
-                # Check if this is a simple hex or decimal assignment
+                # Handle direct hex/decimal assignments
                 if expr.startswith('0x') or expr.isdigit():
                     values[name] = self._parse_int(expr)
         
-        # Second pass: handle expressions that reference other values
-        for entry in entries:
-            if '=' in entry:
-                name, expr = entry.split('=', 1)
-                name = name.strip()
-                expr = expr.strip()
-                
-                # Skip if already assigned
-                if name in values:
-                    continue
-                
-                # Handle expressions like CMD_SYSTEM_BEGIN + 1
-                if '+' in expr:
-                    parts = expr.split('+')
-                    base = parts[0].strip()
-                    offset = int(parts[1].strip())
+        # Second pass: handle all reference-based assignments
+        # Keep processing until no more changes (to handle dependencies)
+        changed = True
+        while changed:
+            changed = False
+            for entry in entries:
+                if '=' in entry:
+                    name, expr = entry.split('=', 1)
+                    name = name.strip()
+                    expr = expr.strip()
                     
-                    if base in values:
-                        values[name] = values[base] + offset
-                    else:
-                        # Try to parse base as hex/number
-                        base_val = self._parse_int(base)
-                        values[name] = base_val + offset
-                else:
-                    # Try direct parse
-                    val = self._parse_int(expr)
-                    if val != 0 or expr == '0':
-                        values[name] = val
+                    # Skip if already assigned
+                    if name in values:
+                        continue
+                    
+                    # Handle expressions like CMD_SYSTEM_BEGIN + 1
+                    if '+' in expr:
+                        parts = expr.split('+')
+                        base = parts[0].strip()
+                        offset = int(parts[1].strip())
+                        
+                        if base in values:
+                            values[name] = values[base] + offset
+                            changed = True
+                        elif base in [e.split('=')[0].strip() for e in entries if '=' in e]:
+                            # Base exists but not resolved yet, will try next pass
+                            pass
+                    
+                    # Handle simple references like CMD_STAND_INIT = CMD_STAND_BEGIN
+                    elif expr in values:
+                        values[name] = values[expr]
+                        changed = True
+                    elif expr in [e.split('=')[0].strip() for e in entries if '=' in e]:
+                        # Reference exists but not resolved yet
+                        pass
         
         # Third pass: handle implicitly valued entries (no '=')
-        last_value = -1
+        # Process entries in order to get correct sequence
+        last_value = None
         for entry in entries:
-            if '=' not in entry:
-                name = entry
-                
-                # Find the last explicit value before this entry
-                if last_value >= 0:
-                    last_value += 1
-                else:
-                    # Start at 0 if no previous value
-                    last_value = 0
-                
-                values[name] = last_value
-            else:
-                # Update last_value from explicit entries
+            if '=' in entry:
+                # This is an explicit entry - update last_value
                 name = entry.split('=', 1)[0].strip()
                 if name in values:
                     last_value = values[name]
+            else:
+                # This is an implicit entry (no '=')
+                name = entry
+                if last_value is not None:
+                    last_value += 1
+                    values[name] = last_value
+                else:
+                    # Start at 0 if no previous value
+                    values[name] = 0
+                    last_value = 0
         
-        return values
-    
+        return values    
     def _parse_enums(self):
         """Extract all enum definitions"""
         # Find all enum blocks
@@ -424,9 +430,9 @@ class PythonGenerator:
         """Add message class definitions"""
         # Map struct names (without _t suffix) to message class names and magic constants
         message_types = [
-            ('cmd_msg', 'CmdMsg', 'CMD', ['command', 'param_1', 'param_2', 'param_3', 'param_4']),
+            ('cmd_msg', 'CmdMsg', 'CMD', ['command', 'reference', 'param_1', 'param_2', 'param_3', 'param_4']),
             ('qry_msg', 'QryMsg', 'QRY', ['query']),
-            ('rsp_msg', 'RspMsg', 'RSP', ['status', 'value']),
+            ('rsp_msg', 'RspMsg', 'RSP', ['reference', 'status', 'value']),
             ('ind_msg', 'IndMsg', 'IND', ['ind', 'value']),
             ('log_msg', 'LogMsg', 'LOG', ['level', 'message'])
         ]
@@ -633,6 +639,7 @@ The Python protocol module has been generated. Here's how to use it:
     # Create a CMD_STEPPER_TARGET_START command with all 4 parameters
     cmd = CmdMsg(
         command=Cmd.CMD_STEPPER_TARGET_START,
+        reference=1,                           # reference to be returned in the response
         param_1=State.STATE_LIFT_RISING,       # target state
         param_2=100,                           # velocity in TSTEPs
         param_3=500,                           # current in mA
@@ -647,12 +654,14 @@ The Python protocol module has been generated. Here's how to use it:
 📥 RECEIVING RESPONSES
 ────────────────────────────────────────────────────────────────────────────
     # Wait for response (5 second timeout)
+    reference = 1
     response = receive_message(sock, RspMsg, timeout=5.0)
     if response:
-        if response.status == Status.STATUS_OK:
-            print(f"Success! Value: {{response.value}}")
-        else:
-            print(f"Error: {{Status(response.status).name}}")
+        if response.reference == reference
+            if response.status == Status.STATUS_OK:
+                print(f"Success! Value: {{response.value}}")
+            else:
+                print(f"Error: {{Status(response.status).name}}")
 
 🔔 HANDLING INDICATIONS
 ────────────────────────────────────────────────────────────────────────────
@@ -677,12 +686,13 @@ The Python protocol module has been generated. Here's how to use it:
     sock.connect(('192.168.1.100', 5000))
     
     # Send CMD_STEPPER_TARGET_START
-    cmd = CmdMsg(Cmd.CMD_STEPPER_TARGET_START, 
+    reference = 1;
+    cmd = CmdMsg(Cmd.CMD_STEPPER_TARGET_START, reference, 
                  State.STATE_LIFT_RISING, 100, 500, 5000)
     
     if send_message(sock, cmd):
         response = receive_message(sock, RspMsg, timeout=5.0)
-        if response and response.status == Status.STATUS_OK:
+        if response and response.reference == reference and response.status == Status.STATUS_OK:
             print("Operation completed successfully")
     
     sock.close()
