@@ -261,10 +261,10 @@ typedef struct __attribute__((packed)) {
     uint8_t magic;      // PROTOCOL_MAGIC_CMD
     uint16_t command;   // cmd_t
     uint8_t reference;  // Reference to be copied into the response, increment after each command
-    uint32_t param_1;   // Parameter 1
-    uint32_t param_2;   // Parameter 2
-    uint32_t param_3;   // Parameter 3
-    uint32_t param_4;   // Parameter 4
+    int32_t param_1;   // Parameter 1
+    int32_t param_2;   // Parameter 2
+    int32_t param_3;   // Parameter 3
+    int32_t param_4;   // Parameter 4
 } cmd_msg_t;
 
 typedef struct __attribute__((packed)) {
@@ -278,13 +278,13 @@ typedef struct __attribute__((packed)) {
     uint16_t cmd_or_qry; // the value of the command or query that caused the response 
     uint8_t reference;   // Reference from a command or query
     uint16_t status;     // non-zero means error
-    uint32_t value;      // Response value (if any)
+    int32_t value;      // Response value (if any)
 } rsp_msg_t;
 
 typedef struct __attribute__((packed)) {
     uint8_t magic;      // PROTOCOL_MAGIC_IND
     uint16_t ind;       // ind_t
-    uint32_t value;     // Associated value (if any)
+    int32_t value;     // Associated value (if any)
 } ind_msg_t;
 
 typedef struct __attribute__((packed)) {

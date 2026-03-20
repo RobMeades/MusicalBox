@@ -243,14 +243,16 @@ class CHeaderParser:
         # Remove comments
         body = re.sub(r'//.*$', '', body, flags=re.MULTILINE)
         
-        # Type mapping for size calculation
+        # Type mapping for size calculation - include signed types
         type_sizes = {
             'uint8_t': 1,
             'uint16_t': 2,
             'uint32_t': 4,
+            'int8_t': 1,
+            'int16_t': 2,
+            'int32_t': 4,
             'char': 1
         }
-        
         # Split into individual field declarations
         field_lines = []
         current_field = []
@@ -402,11 +404,14 @@ class PythonGenerator:
         struct_info = self.p.structs[struct_name]
         format_chars = []
         
-        # Type to struct format mapping
+        # Type to struct format mapping - include signed types
         type_format = {
             'uint8_t': 'B',
             'uint16_t': 'H',
             'uint32_t': 'I',
+            'int8_t': 'b',
+            'int16_t': 'h',
+            'int32_t': 'i',
             'char': 's'
         }
         
@@ -419,7 +424,9 @@ class PythonGenerator:
             elif type_name == 'char':
                 format_chars.append('s')
             else:
-                format_chars.append(type_format.get(type_name, 'B'))
+                # Look up the format character, default to 'B' for unknown types
+                format_char = type_format.get(type_name, 'B')
+                format_chars.append(format_char)
         
         format_str = '<' + ''.join(format_chars)  # Little-endian
         total_size = struct.calcsize(format_str)
@@ -431,8 +438,8 @@ class PythonGenerator:
         # Map struct names (without _t suffix) to message class names and magic constants
         message_types = [
             ('cmd_msg', 'CmdMsg', 'CMD', ['command', 'reference', 'param_1', 'param_2', 'param_3', 'param_4']),
-            ('qry_msg', 'QryMsg', 'QRY', ['query']),
-            ('rsp_msg', 'RspMsg', 'RSP', ['reference', 'status', 'value']),
+            ('qry_msg', 'QryMsg', 'QRY', ['query', 'reference',]),
+            ('rsp_msg', 'RspMsg', 'RSP', ['cmd_or_qry', 'reference', 'status', 'value']),
             ('ind_msg', 'IndMsg', 'IND', ['ind', 'value']),
             ('log_msg', 'LogMsg', 'LOG', ['level', 'message'])
         ]
@@ -614,14 +621,17 @@ class PythonGenerator:
         """Print usage instructions for the generated module"""
         log_max_len = self.p.log_max_len or 256
         instructions = f"""
-╔════════════════════════════════════════════════════════════════════════════╗
+╔═════════════════════════════════════════════════════════�
+�══════════════════╗
 ║                    Protocol Module Generated Successfully                   ║
-╚════════════════════════════════════════════════════════════════════════════╝
+╚═════════════════════════════════════════════════════════════�
+�══════════════╝
 
 The Python protocol module has been generated. Here's how to use it:
 
 📦 IMPORTING
-────────────────────────────────────────────────────────────────────────────
+─────────────────────────────────────────────────────────────�
+��──────────────
     from protocol import (
         # Enums
         Cmd, Qry, Ind, LogLevel, Status,
@@ -635,7 +645,8 @@ The Python protocol module has been generated. Here's how to use it:
     )
 
 🎯 SENDING COMMANDS
-────────────────────────────────────────────────────────────────────────────
+────────────────────────────────────────────────────────────────
+────────────
     # Create a CMD_STEPPER_TARGET_START command with all 4 parameters
     cmd = CmdMsg(
         command=Cmd.CMD_STEPPER_TARGET_START,
@@ -652,7 +663,8 @@ The Python protocol module has been generated. Here's how to use it:
     send_message(sock, cmd)
 
 📥 RECEIVING RESPONSES
-────────────────────────────────────────────────────────────────────────────
+──────────────────────────────────────────────────────────────�
+�─────────────
     # Wait for response (5 second timeout)
     reference = 1
     response = receive_message(sock, RspMsg, timeout=5.0)
@@ -664,20 +676,23 @@ The Python protocol module has been generated. Here's how to use it:
                 print(f"Error: {{Status(response.status).name}}")
 
 🔔 HANDLING INDICATIONS
-────────────────────────────────────────────────────────────────────────────
+─────────────────────────────────────────────────────────────────�
+��──────────
     # Receive an asynchronous indication
     ind = receive_message(sock, IndMsg)
     if ind:
         print(f"Indication: {{Ind(ind.ind).name}}, value: {{ind.value}}")
 
 📝 SENDING LOGS
-────────────────────────────────────────────────────────────────────────────
+────────────────────────────────────────────────────────────�
+�───────────────
     # Send a log message
     log = LogMsg(LogLevel.LOG_INFO, "System initialized")
     send_message(log_sock, log)
 
 🔄 COMPLETE EXAMPLE
-────────────────────────────────────────────────────────────────────────────
+────────────────────────────────────────────────────────────�
+�───────────────
     import socket
     from protocol import *
     
@@ -698,7 +713,8 @@ The Python protocol module has been generated. Here's how to use it:
     sock.close()
 
 ⚠️ NOTES
-────────────────────────────────────────────────────────────────────────────
+───────────────────────────────────────────────────────────────────────────�
+��
     • All multi-byte fields are little-endian (matches ESP32 and Raspberry Pi)
     • TCP provides reliable delivery - no checksums needed
     • Message sizes are fixed - receive exactly SIZE bytes
@@ -754,3 +770,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

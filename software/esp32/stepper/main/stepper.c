@@ -243,8 +243,8 @@ static void flash_debug_led(int32_t duration_ms)
  *                      null terminator), or -1 if output
  *                      buffer is too small
  */
-int32_t hex_dump_to_buffer(const void *data, size_t data_size,
-                           char *output, size_t output_size)
+static int32_t hex_dump_to_buffer(const void *data, size_t data_size,
+                                  char *output, size_t output_size)
 {
     const unsigned char *bytes = (const unsigned char *)data;
     char *out_ptr = output;
@@ -1166,7 +1166,26 @@ static status_t filter_and_conclude(cmd_msg_t *cmd_msg,
                         " non-zero velocity (%d), zeroing the velocity.",
                         cmd_msg->param_1, cmd_msg->param_2);
                 cmd_msg->param_2 = 0;
-            }
+            // Correct any mistakes in velocity versus requested state
+            } else if (((cmd_msg->param_1 == STATE_STAND_ROTATING_CLOCKWISE) &&
+                        (cmd_msg->param_2 > 0)) ||
+                       ((cmd_msg->param_1 == STATE_STAND_ROTATING_ANTICLOCKWISE) &&
+                        (cmd_msg->param_2 < 0)) ||
+                       (((cmd_msg->param_1 == STATE_LIFT_STOPPED_UP) || (cmd_msg->param_1 == STATE_LIFT_RISING)) &&
+                        (cmd_msg->param_2 < 0)) ||
+                       (((cmd_msg->param_1 == STATE_LIFT_STOPPED_DOWN) || (cmd_msg->param_1 == STATE_LIFT_LOWERING)) &&
+                         (cmd_msg->param_2 > 0)) ||
+                       (((cmd_msg->param_1 == STATE_PLINKY_PLONKY_STOPPED_AT_REFERENCE) || (cmd_msg->param_1 == STATE_PLINKY_PLONKY_PLAYING)) &&
+                        (cmd_msg->param_2 < 0)) ||
+                       (((cmd_msg->param_1 == STATE_DOOR_STOPPED_OPEN) || (cmd_msg->param_1 == STATE_DOOR_OPENING)) &&
+                        (cmd_msg->param_2 > 0)) ||
+                       (((cmd_msg->param_1 == STATE_DOOR_STOPPED_CLOSED) || (cmd_msg->param_1 == STATE_DOOR_CLOSING)) &&
+                        (cmd_msg->param_2 < 0))) {
+                ESP_LOGW(TAG, "Sign of velocity (%d) doesn't match target state (0x%04x),"
+                        " negating the velocity.",
+                        cmd_msg->param_2, cmd_msg->param_1);
+                cmd_msg->param_2 = -cmd_msg->param_2;
+             }
             // Now, if necessary, set up an end condition associated
             // with a sensor check
             if ((cmd_msg->param_1 == STATE_LIFT_STOPPED_DOWN) ||
@@ -1194,18 +1213,32 @@ static status_t filter_and_conclude(cmd_msg_t *cmd_msg,
 // Set a command in motion.
 // IMPORTANT: the production context should be locked before this is called.
 static status_t do_cmd(cmd_msg_t *cmd_msg,
-                       context_production_t *context)
+                       context_production_t *context,
+                       bool *and_reboot)
 {
     status_t status = STATUS_ERROR_INVALID_COMMAND;
     context_state_t *context_state = &context->context_state;
     bool (*stop_callback)(context_state_t *) = NULL;
 
+    if (and_reboot) {
+        *and_reboot = false;
+    }
+
     switch(cmd_msg->command) {
         case CMD_REBOOT:
             status = STATUS_ERROR_UNHANDLED_COMMAND;
-            // TODO
-            ESP_LOGE(TAG, "Received CMD_REBOOT (0x%04x), not implemented yet.",
-                     cmd_msg->command);
+            if (and_reboot) {
+                *and_reboot = true;
+                ESP_LOGI(TAG, "Received CMD_REBOOT (0x%04x).", cmd_msg->command);
+                status = STATUS_OK;
+                tmc2209_deinit();
+                log_deinit();
+                network_deinit();
+                esp_restart();
+            } else {
+                ESP_LOGE(TAG, "Received CMD_REBOOT (0x%04x), not implemented.",
+                        cmd_msg->command);
+            }
         break;
         case CMD_LOG_START:
             status = STATUS_ERROR_UNHANDLED_COMMAND;
@@ -1266,8 +1299,18 @@ static status_t do_cmd(cmd_msg_t *cmd_msg,
                         err = tmc2209_set_velocity(TMC2209_ADDRESS, cmd_msg->param_2);
                     }
                     if ((err == ESP_OK) && (cmd_msg->param_2 != 0)) {
-                        // We're gonna move, so enable the motor
-                        err = tmc2209_motor_enable(TMC2209_ADDRESS);
+                        if (we_are_door(context_state->init)) {
+                            // Doors need specific treatment
+                            ESP_LOGI(TAG, "Switching off StallGuard and CoolStep.");
+                            err = tmc2209_set_stealth_chop_threshold(TMC2209_ADDRESS, UINT32_MAX);
+                            if (err == ESP_OK) {
+                                err = tmc2209_stop_that_bloody_racket(TMC2209_ADDRESS, 3, 3, 6, 0);
+                            }
+                        }
+                        if (err == ESP_OK) {
+                            // We're gonna move, so enable the motor
+                            err = tmc2209_motor_enable(TMC2209_ADDRESS);
+                        }
                     }
                 }
                 if (err == ESP_OK) {
@@ -1427,7 +1470,7 @@ static void monitor_task(void *arg)
 
 // Answer a query, updating the current state as we go.
 // IMPORTANT: the production context should be locked before this is called.
-static int32_t answer_qry(qry_t qry, uint32_t *value,
+static int32_t answer_qry(qry_t qry, int32_t *value,
                           context_state_t *context)
 {
     status_t status = STATUS_ERROR_INVALID_QUERY;
@@ -1516,6 +1559,7 @@ static cmd_or_qry_t *process_rx_data(uint8_t *buffer, int32_t *len,
         switch (context->msg_parser_state) {
             case MSG_PARSER_STATE_NEED_MAGIC:
             {
+                ESP_LOGD(TAG, "MSG_PARSER_STATE_NEED_MAGIC");
                 context->cmd_or_qry.buffer[context->buffer_index] = buffer[bytes_processed];
                 if (context->cmd_or_qry.buffer[context->buffer_index] == PROTOCOL_MAGIC_CMD) {
                     context->msg_parser_state = MSG_PARSER_STATE_NEED_CMD_BODY;
@@ -1531,6 +1575,7 @@ static cmd_or_qry_t *process_rx_data(uint8_t *buffer, int32_t *len,
             break;
             case MSG_PARSER_STATE_NEED_CMD_BODY:
             {
+                ESP_LOGD(TAG, "MSG_PARSER_STATE_NEED_CMD_BODY");
                 context->cmd_or_qry.buffer[context->buffer_index] = buffer[bytes_processed];
                 context->buffer_index++;
                 if (context->buffer_index >= sizeof(cmd_msg_t)) {
@@ -1549,6 +1594,7 @@ static cmd_or_qry_t *process_rx_data(uint8_t *buffer, int32_t *len,
             break;
             case MSG_PARSER_STATE_NEED_QRY_BODY:
             {
+                ESP_LOGD(TAG, "MSG_PARSER_STATE_NEED_QRY_BODY");
                 context->cmd_or_qry.buffer[context->buffer_index] = buffer[bytes_processed];
                 context->buffer_index++;
                 if (context->buffer_index >= sizeof(qry_msg_t)) {
@@ -1604,12 +1650,17 @@ static void comms_rx_task(void *arg)
         int32_t err = recv(context->socket, &buffer, sizeof(buffer), 0);
         if (err > 0) {
             // Process received data
+            ESP_LOGD(TAG, "Received %d byte(s) from server:", err);
+            char debug_buffer[128];
+            hex_dump_to_buffer(buffer, err, debug_buffer, sizeof(debug_buffer));
+            ESP_LOGD(TAG, "%s", debug_buffer);
             while (err > 0) {
                 cmd_or_qry_t *cmd_or_qry = process_rx_data(buffer, &err, &context->context_parser);
                 if (cmd_or_qry) {
+                    bool and_reboot = false;
                     if (!cmd_or_qry->cmd_not_qry) {
                         // Got a query, get the answer
-                        uint32_t value = 0;
+                        int32_t value = 0;
                         rsp.reference = cmd_or_qry->qry.reference;
                         rsp.cmd_or_qry = cmd_or_qry->qry.query;
                         rsp.status = answer_qry(cmd_or_qry->qry.query, &value,
@@ -1619,10 +1670,19 @@ static void comms_rx_task(void *arg)
                         // Got a command: set it in motion
                         rsp.reference = cmd_or_qry->cmd.reference;
                         rsp.cmd_or_qry = cmd_or_qry->cmd.command;
-                        rsp.status = do_cmd(&cmd_or_qry->cmd, context);
+                        rsp.status = do_cmd(&cmd_or_qry->cmd, context, &and_reboot);
                     }
                     // Send the response.
                     send_tx_data((uint8_t *) &rsp, sizeof(rsp), context->socket);
+                    if (and_reboot) {
+                        // Goin' down...
+                        ESP_LOGW(TAG, "Rebooting in a few seconds...");
+                        vTaskDelay(pdMS_TO_TICKS(2000));
+                        tmc2209_deinit();
+                        log_deinit();
+                        network_deinit();
+                        esp_restart();
+                    }
                 }
             }
         } else if (err == 0) {

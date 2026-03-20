@@ -26,20 +26,24 @@ class State(IntEnum):
     """States"""
     STATE_NULL = 0
     STATE_STAND_BEGIN = 4096
+    STATE_STAND_STOPPED = 4096
     STATE_STAND_ROTATING_CLOCKWISE = 4097
     STATE_STAND_ROTATING_ANTICLOCKWISE = 4098
     STATE_STAND_END = 8191
     STATE_LIFT_BEGIN = 8192
+    STATE_LIFT_STOPPED_UNKNOWN = 8192
     STATE_LIFT_STOPPED_DOWN = 8193
     STATE_LIFT_STOPPED_UP = 8194
     STATE_LIFT_RISING = 8195
     STATE_LIFT_LOWERING = 8196
     STATE_LIFT_END = 12287
     STATE_PLINKY_PLONKY_BEGIN = 12288
+    STATE_PLINKY_PLONKY_STOPPED_UNKNOWN = 12288
     STATE_PLINKY_PLONKY_STOPPED_AT_REFERENCE = 12289
     STATE_PLINKY_PLONKY_PLAYING = 12290
     STATE_PLINKY_PLONKY_END = 16383
     STATE_DOOR_BEGIN = 16384
+    STATE_DOOR_STOPPED_UNKNOWN = 16384
     STATE_DOOR_STOPPED_CLOSED = 16385
     STATE_DOOR_STOPPED_OPEN = 16386
     STATE_DOOR_OPENING = 16387
@@ -49,45 +53,58 @@ class State(IntEnum):
 class Cmd(IntEnum):
     """Command codes"""
     CMD_SYSTEM_BEGIN = 0
+    CMD_REBOOT = 0
     CMD_LOG_START = 1
     CMD_LOG_STOP = 2
     CMD_STEPPER_TARGET_START = 3
     CMD_SYSTEM_END = 255
     CMD_STAND_BEGIN = 4096
+    CMD_STAND_INIT = 4096
     CMD_STAND_END = 4351
     CMD_LIFT_BEGIN = 8192
+    CMD_LIFT_INIT = 8192
     CMD_LIFT_END = 8447
     CMD_PLINKY_PLONKY_BEGIN = 12288
+    CMD_PLINKY_PLONKY_INIT = 12288
     CMD_PLINKY_PLONKY_END = 12543
     CMD_DOOR_BEGIN = 16384
+    CMD_DOOR_INIT = 16384
     CMD_DOOR_END = 16639
 
 class Qry(IntEnum):
     """Query codes"""
     QRY_SYSTEM_BEGIN = 256
+    QRY_SYSTEM_STEPPER_STATE = 256
     QRY_SYSTEM_END = 511
     QRY_STAND_BEGIN = 4352
     QRY_STAND_END = 4607
     QRY_LIFT_BEGIN = 8448
+    QRY_LIFT_SENSOR_DOWN = 8448
     QRY_LIFT_SENSOR_LIMIT = 8449
     QRY_LIFT_END = 8703
     QRY_PLINKY_PLONKY_BEGIN = 12544
+    QRY_PLINKY_PLONKY_SENSOR_REFERENCE = 12544
     QRY_PLINKY_PLONKY_END = 12799
     QRY_DOOR_BEGIN = 16640
+    QRY_DOOR_SENSOR_OPEN = 16640
     QRY_DOOR_END = 16895
 
 class Ind(IntEnum):
     """Indication/Event codes"""
     IND_SYSTEM_BEGIN = 512
+    IND_SYSTEM_STEPPER_TARGET_END = 512
     IND_SYSTEM_END = 767
     IND_STAND_BEGIN = 4608
     IND_STAND_END = 4863
     IND_LIFT_BEGIN = 8704
+    IND_LIFT_SENSOR_TRIGGERED_LIFT_DOWN = 8704
     IND_LIFT_SENSOR_TRIGGERED_LIFT_LIMIT = 8705
     IND_LIFT_END = 8959
     IND_PLINKY_PLONKY_BEGIN = 12800
+    IND_PLINKY_PLONKY_SENSOR_TRIGGERED_REFERENCE = 12800
     IND_PLINKY_PLONKY_END = 13055
     IND_DOOR_BEGIN = 16896
+    IND_DOOR_SENSOR_TRIGGERED_DOOR_OPEN = 16896
     IND_DOOR_END = 17151
 
 class LogLevel(IntEnum):
@@ -103,16 +120,18 @@ class Status(IntEnum):
     STATUS_ERROR_GENERIC = 1
     STATUS_ERROR_INVALID_COMMAND = 2
     STATUS_ERROR_UNHANDLED_COMMAND = 3
-    STATUS_ERROR_INVALID_PARAM = 4
-    STATUS_ERROR_BUSY = 5
-    STATUS_ERROR_TIMEOUT = 6
-    STATUS_ERROR_HARDWARE = 7
-    STATUS_ERROR_ABORT = 8
+    STATUS_ERROR_INVALID_QUERY = 4
+    STATUS_ERROR_UNHANDLED_QUERY = 5
+    STATUS_ERROR_INVALID_PARAM = 6
+    STATUS_ERROR_ABORT = 7
+    STATUS_ERROR_BUSY = 8
+    STATUS_ERROR_TIMEOUT = 9
+    STATUS_ERROR_HARDWARE = 10
 
 class CmdMsg:
     """CmdMsg - packed binary message"""
-    FORMAT = "<BHIIIII"
-    SIZE = 23
+    FORMAT = "<BHBiiii"
+    SIZE = 20
     MAGIC = PROTOCOL_MAGIC_CMD
 
     def __init__(self, command, reference=0, param_1=0, param_2=0, param_3=0, param_4=0):
@@ -145,18 +164,19 @@ class CmdMsg:
 
 class QryMsg:
     """QryMsg - packed binary message"""
-    FORMAT = "<BH"
-    SIZE = 3
+    FORMAT = "<BHB"
+    SIZE = 4
     MAGIC = PROTOCOL_MAGIC_QRY
 
-    def __init__(self, query):
+    def __init__(self, query, reference=0):
         self.magic = self.MAGIC
         self.query = query
+        self.reference = reference
 
     def pack(self) -> bytes:
         """Pack message into bytes for transmission"""
         return struct.pack(self.FORMAT,
-                          self.magic, self.query)
+                          self.magic, self.query, self.reference)
 
     @classmethod
     def unpack(cls, data: bytes) -> "QryMsg":
@@ -170,24 +190,25 @@ class QryMsg:
         return cls(*values[1:])
 
     def __repr__(self):
-        return f"<QryMsg query={self.query}>"
+        return f"<QryMsg query={self.query} reference={self.reference}>"
 
 class RspMsg:
     """RspMsg - packed binary message"""
-    FORMAT = "<BIHI"
-    SIZE = 11
+    FORMAT = "<BHBHi"
+    SIZE = 10
     MAGIC = PROTOCOL_MAGIC_RSP
 
-    def __init__(self, status, reference=0, value=0):
+    def __init__(self, cmd_or_qry, reference=0, status=0, value=0):
         self.magic = self.MAGIC
-        self.status = status
+        self.cmd_or_qry = cmd_or_qry
         self.reference = reference
+        self.status = status
         self.value = value
 
     def pack(self) -> bytes:
         """Pack message into bytes for transmission"""
         return struct.pack(self.FORMAT,
-                          self.magic, self.status, self.reference, self.value)
+                          self.magic, self.cmd_or_qry, self.reference, self.status, self.value)
 
     @classmethod
     def unpack(cls, data: bytes) -> "RspMsg":
@@ -201,11 +222,11 @@ class RspMsg:
         return cls(*values[1:])
 
     def __repr__(self):
-        return f"<RspMsg status={self.status} reference={self.reference} value={self.value}>"
+        return f"<RspMsg cmd_or_qry={self.cmd_or_qry} reference={self.reference} status={self.status} value={self.value}>"
 
 class IndMsg:
     """IndMsg - packed binary message"""
-    FORMAT = "<BHI"
+    FORMAT = "<BHi"
     SIZE = 7
     MAGIC = PROTOCOL_MAGIC_IND
 
