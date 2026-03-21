@@ -16,6 +16,8 @@ Since the Pi will lose connectivity to your Wi-Fi network (you do _not_ want an 
 
   - `sudo apt install python3-systemd`: which will be needed by `log_server.py`,
 
+  - `sudo apt install python3-aiohttp-jinja2`: which will be needed by `web_server.py`,
+
   - `sudo apt install lrzsz`: this allows the `minicom` and `picocom` serial communications programs to perform file transfer,
   
   - `sudo apt install iptables iptables-persistent`: will be needed for MAC address filtering,
