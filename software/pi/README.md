@@ -6,6 +6,8 @@ This folder contains the Python scripts that run on the central Raspberry Pi ins
 - `pi_wifi_dhcp_mac.md`: how to set up the Pi to do DHCP with static IP addresses for known things, and only allow known MAC addresses to connect,
 - `https_server.py`: the HTTPS server that provies OTA updates to the connected ESP32s,
 - `log_server.py`: a server that listens for and writes to the `journal` log output from the connected ESP32s.
-- `control_server.py`: the meat of it all, what actually controls the system.
+- `esp32_server.py`: this is what all the ESP32s look for and listen to.
+- `musical_box_manager.py`: specialises `esp32_server.py` into the musical box.
+- `web_server.py`: provides a web interface to `musical_box_manager.py`.
 - `binary_file_version.py`: a utility that extracts the version information from an ESP32 compiled binary file.
 - `stepper.py`: a script used during  early development to drive a unipolar stepper motor via a ULN2003 driver; no longer used.
