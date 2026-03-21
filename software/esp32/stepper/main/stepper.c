@@ -1392,15 +1392,17 @@ static void monitor_task(void *arg)
         if (we_are_lift(context_state->init)){
             previous_state = context_sensor->is_down;
             context_sensor->is_down = is_down();
-            if (!previous_state && context_sensor->is_down) {
+            if (previous_state != context_sensor->is_down) {
                 ind.ind = IND_LIFT_SENSOR_TRIGGERED_LIFT_DOWN;
+                ind.value = !previous_state;
                 send_tx_data((uint8_t *) &ind, sizeof(ind), context->socket);
                 ESP_LOGI(TAG, "Sent IND_LIFT_SENSOR_TRIGGERED_LIFT_DOWN.");
             }
             previous_state = context_sensor->is_at_limit;
             context_sensor->is_at_limit = is_at_limit();
-            if (!previous_state && context_sensor->is_at_limit) {
+            if (previous_state != context_sensor->is_at_limit) {
                 ind.ind = IND_LIFT_SENSOR_TRIGGERED_LIFT_LIMIT;
+                ind.value = !previous_state;
                 send_tx_data((uint8_t *) &ind, sizeof(ind), context->socket);
                 ESP_LOGI(TAG, "Sent IND_LIFT_SENSOR_TRIGGERED_LIFT_LIMIT.");
             }
@@ -1408,8 +1410,9 @@ static void monitor_task(void *arg)
         if (we_are_plinky_plonky(context_state->init)){
             previous_state = context_sensor->is_at_reference;
             context_sensor->is_at_reference = is_at_reference();
-            if (!previous_state && context_sensor->is_at_reference) {
+            if (previous_state != context_sensor->is_at_reference) {
                 ind.ind = IND_PLINKY_PLONKY_SENSOR_TRIGGERED_REFERENCE;
+                ind.value = !previous_state;
                 send_tx_data((uint8_t *) &ind, sizeof(ind), context->socket);
                 ESP_LOGI(TAG, "Sent IND_PLINKY_PLONKY_SENSOR_TRIGGERED_REFERENCE.");
             }
@@ -1417,8 +1420,9 @@ static void monitor_task(void *arg)
         if (we_are_door(context_state->init)){
             previous_state = context_sensor->is_open;
             context_sensor->is_open = is_open();
-            if (!previous_state && context_sensor->is_open) {
+            if (previous_state != context_sensor->is_open) {
                 ind.ind = IND_DOOR_SENSOR_TRIGGERED_DOOR_OPEN;
+                ind.value = !previous_state;
                 send_tx_data((uint8_t *) &ind, sizeof(ind), context->socket);
                 ESP_LOGI(TAG, "Sent IND_DOOR_SENSOR_TRIGGERED_DOOR_OPEN.");
             }
