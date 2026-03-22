@@ -177,7 +177,7 @@ class WebControlInterface:
         return response
 
     async def handle_logs_stream(self, request):
-        """Server-Sent Events stream for log updates"""
+        """Server-Sent Events stream for log updates (incremental)"""
         response = web.StreamResponse(
             status=200,
             headers={
@@ -187,23 +187,27 @@ class WebControlInterface:
             }
         )
         await response.prepare(request)
-
+        
         client_id = id(response)
         self.sse_clients.add(client_id)
-
+        
+        # Keep track of last log count for this client
+        last_count = 0
+        
         try:
-            last_version = 0
             while self.running:
-                if self._log_version > last_version:
-                    last_version = self._log_version
-                    logs = list(self.log_entries)
-                    await response.write(f"data: {json.dumps(logs)}\n\n".encode())
+                current_count = len(self.log_entries)
+                if current_count > last_count:
+                    # Send only new logs
+                    new_logs = list(self.log_entries)[last_count:]
+                    await response.write(f"data: {json.dumps(new_logs)}\n\n".encode())
+                    last_count = current_count
                 await asyncio.sleep(0.5)
         except Exception:
             pass
         finally:
             self.sse_clients.discard(client_id)
-
+        
         return response
 
     async def _broadcast_status(self):
@@ -382,46 +386,69 @@ class WebControlInterface:
         self._status_version += 1
         
         try:
-            # 1. Open all doors
-            self._log_message("Opening doors...")
-            self.manager.door_open(index=-1, opposites_day=False)
-            
-            # Wait for doors to complete movement
-            self._log_message("Waiting 8 seconds for doors to open...")
-            await asyncio.sleep(8)
-            
-            # CRITICAL: Query door states to get actual stepper position
-            self._log_message("Querying door states...")
-            for ip, info in self.manager.devices.items():
-                if info["init"] == protocol.Cmd.CMD_DOOR_INIT:
-                    self.manager.query_door_state(ip)
-            
-            # Also query sensors for confirmation
+            # Query door sensors to get reliable position
+            door_count = 0
             self._log_message("Querying door sensors...")
             for ip, info in self.manager.devices.items():
                 if info["init"] == protocol.Cmd.CMD_DOOR_INIT:
+                    door_count += 1
                     self.manager.query_door_sensor(ip)
             
             # Wait for responses
             await asyncio.sleep(2)
-            
-            # Log the current door states
+
+            # Check and log the current door states
             self._log_message("Current door states:")
+            open_count = 0
             for ip, info in self.manager.devices.items():
                 if info["init"] == protocol.Cmd.CMD_DOOR_INIT:
                     state = self.manager.door_states.get(ip)
                     sensor = self.manager.door_sensors.get(ip, {}).get('open', False)
                     self._log_message(f"  Door {ip}: state={state}, sensor={sensor}")
-            
-            # 2. Raise lift
-            self._log_message("Raising lift...")
-            self.manager.lift_up(opposites_day=False)
-            await asyncio.sleep(8)
-            
-            # 3. Start plinky-plonky
-            self._log_message("Starting music...")
-            self.manager.plinky_plonky_play(opposites_day=False)
-            
+                    if sensor:
+                        open_count += 1
+
+            if open_count == 0:        
+
+                self._log_message("Starting music and rotation...")
+                self.manager.plinky_plonky_play()
+                self.manager.stand_rotate_clockwise()
+
+                self._log_message("Waiting for 7 seconds...")
+                await asyncio.sleep(7)
+
+                self._log_message("Opening doors...")
+                self.manager.door_open()
+
+                self._log_message("Waiting 5 seconds...")
+                await asyncio.sleep(5)
+
+                # Log the current door states
+                open_count = 0
+                self._log_message("Current door states:")
+                for ip, info in self.manager.devices.items():
+                    if info["init"] == protocol.Cmd.CMD_DOOR_INIT:
+                        state = self.manager.door_states.get(ip)
+                        sensor = self.manager.door_sensors.get(ip, {}).get('open', False)
+                        self._log_message(f"  Door {ip}: state={state}, sensor={sensor}")
+                        if sensor:
+                            open_count += 1
+
+                if open_count == door_count:
+                    # Raise lift
+                    self._log_message("Raising lift...")
+                    self.manager.lift_up()
+                else:
+                    self._log_message(f"Not raising the lift as only {open_count}"
+                                      f" out of {door_count} door(s) are open")
+            else:
+                self._log_message("Not starting the open sequence as there are"
+                                  f" {open_count} door(s) already open")
+
+            self._log_message("Waiting for music to stop...")
+            while not self.manager.is_plinky_plonky_at_reference():
+                await asyncio.sleep(1)
+
             self.operation_status = "completed"
             self._log_message("Open sequence completed")
             
@@ -439,20 +466,61 @@ class WebControlInterface:
         self._status_version += 1
 
         try:
-            # 1. Stop plinky-plonky
-            self._log_message("Stopping music...")
-            self.manager.plinky_plonky_play(opposites_day=True)
-            await asyncio.sleep(2)
+            self._log_message("Starting music and rotation...")
+            self.manager.plinky_plonky_play()
+            self.manager.stand_rotate_clockwise()
 
-            # 2. Lower lift
+            self._log_message("Waiting for 7 seconds...")
+            await asyncio.sleep(7)
+
+            # Lower lift
             self._log_message("Lowering lift...")
             self.manager.lift_up(opposites_day=True)
-            await asyncio.sleep(8)  # Wait for lift to lower
+            lift_down_wait_seconds = 15
+            while not self.manager.is_lift_down() and lift_down_wait_seconds > 0:
+                await asyncio.sleep(1)
+                lift_down_wait_seconds -= 1
 
-            # 3. Close all doors
-            self._log_message("Closing doors...")
-            self.manager.door_open(index=-1, opposites_day=True)
-            await asyncio.sleep(5)  # Wait for doors to close
+            if lift_down_wait_seconds > 0:
+                # Log the current door states
+                door_count = 0
+                open_count = 0
+                self._log_message("Current door states:")
+                for ip, info in self.manager.devices.items():
+                    if info["init"] == protocol.Cmd.CMD_DOOR_INIT:
+                        door_count += 1
+                        state = self.manager.door_states.get(ip)
+                        sensor = self.manager.door_sensors.get(ip, {}).get('open', False)
+                        self._log_message(f"  Door {ip}: state={state}, sensor={sensor}")
+                        if sensor:
+                            open_count += 1
+
+                if open_count == door_count:
+                    self._log_message("Closing doors...")
+                    self.manager.door_open(opposites_day=True)
+
+                    self._log_message("Waiting 5 seconds...")
+                    await asyncio.sleep(5)
+
+                    # Log the current door states
+                    open_count = 0
+                    self._log_message("Current door states:")
+                    for ip, info in self.manager.devices.items():
+                        if info["init"] == protocol.Cmd.CMD_DOOR_INIT:
+                            state = self.manager.door_states.get(ip)
+                            sensor = self.manager.door_sensors.get(ip, {}).get('open', False)
+                            self._log_message(f"  Door {ip}: state={state}, sensor={sensor}")
+
+                else:
+                    self._log_message("Not closing the doors as"
+                                      f" {door_count - open_count} door(s) already closed")
+
+            else:
+                self._log_message("Not closing the doors as the lift did not get down")
+
+            self._log_message("Waiting for music to stop...")
+            while not self.manager.is_plinky_plonky_at_reference():
+                await asyncio.sleep(1)
 
             self.operation_status = "completed"
             self._log_message("Close sequence completed")
@@ -1101,26 +1169,35 @@ class WebControlInterface:
             if (systemStatus) systemStatus.innerHTML = html;
         }
 
-        function updateLogs(logs) {
+        let logBuffer = [];
+
+        function updateLogs(newLogs) {
             const debugWindow = document.getElementById('debugWindow');
             if (!debugWindow) return;
             
-            if (logs.length === 0) {
-                debugWindow.innerHTML = 'No logs yet...';
-            } else {
-                const wasAtBottom = autoScrollEnabled;
-                
-                debugWindow.innerHTML = logs.map(log => {
-                    let className = 'log-info';
-                    if (log.includes('ERROR')) className = 'log-error';
-                    else if (log.includes('WARNING')) className = 'log-warning';
-                    else if (log.includes('DEBUG')) className = 'log-debug';
-                    return `<div class="${className}">${escapeHtml(log)}</div>`;
-                }).join('');
-                
-                if (wasAtBottom) {
-                    debugWindow.scrollTop = debugWindow.scrollHeight;
-                }
+            if (newLogs.length === 0) return;
+            
+            // Remember scroll state
+            const wasAtBottom = debugWindow.scrollHeight - debugWindow.scrollTop - debugWindow.clientHeight < 10;
+            
+            // Append new logs
+            newLogs.forEach(log => {
+                let className = 'log-info';
+                if (log.includes('ERROR')) className = 'log-error';
+                else if (log.includes('WARNING')) className = 'log-warning';
+                else if (log.includes('DEBUG')) className = 'log-debug';
+                const logDiv = document.createElement('div');
+                logDiv.className = className;
+                logDiv.textContent = log;
+                debugWindow.appendChild(logDiv);
+            });
+            
+            // Update buffer
+            logBuffer = logBuffer.concat(newLogs);
+            
+            // Auto-scroll only if user was at bottom
+            if (wasAtBottom) {
+                debugWindow.scrollTop = debugWindow.scrollHeight;
             }
         }
 
@@ -1128,6 +1205,31 @@ class WebControlInterface:
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        function appendLogs(newLogs) {
+            const debugWindow = document.getElementById('debugWindow');
+            if (!debugWindow) return;
+            
+            // Check if user was at bottom
+            const wasAtBottom = debugWindow.scrollHeight - debugWindow.scrollTop - debugWindow.clientHeight < 10;
+            
+            // Append each new log
+            newLogs.forEach(log => {
+                let className = 'log-info';
+                if (log.includes('ERROR')) className = 'log-error';
+                else if (log.includes('WARNING')) className = 'log-warning';
+                else if (log.includes('DEBUG')) className = 'log-debug';
+                const logDiv = document.createElement('div');
+                logDiv.className = className;
+                logDiv.textContent = log;
+                debugWindow.appendChild(logDiv);
+            });
+            
+            // Auto-scroll only if user was at bottom
+            if (wasAtBottom) {
+                debugWindow.scrollTop = debugWindow.scrollHeight;
+            }
         }
 
         // Set up SSE for status updates
@@ -1145,11 +1247,13 @@ class WebControlInterface:
                 }, 5000);
             };
 
-            // Logs stream
-            logsSource = new EventSource('/api/logs/stream');
+            // Logs stream - UPDATED with incremental updates
+            const logsSource = new EventSource('/api/logs/stream');
             logsSource.onmessage = function(event) {
-                const logs = JSON.parse(event.data);
-                updateLogs(logs);
+                const newLogs = JSON.parse(event.data);
+                if (newLogs.length > 0) {
+                    appendLogs(newLogs);
+                }
             };
             logsSource.onerror = function() {
                 console.log('Logs stream disconnected, reconnecting...');
