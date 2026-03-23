@@ -40,16 +40,17 @@ class Esp32Server:
     def __init__(self):
         # Your known devices (fixed IPs)
         self.devices = {
-            "10.10.3.10": {"name": "stand", "init": protocol.Cmd.CMD_STAND_INIT, "connected": False, "sock": None, "init_done": False, "reference": 0},
-            "10.10.3.20": {"name": "lift", "init": protocol.Cmd.CMD_LIFT_INIT, "connected": False, "sock": None, "init_done": False, "reference": 0},
-            "10.10.3.30": {"name": "plinky-plonky", "init": protocol.Cmd.CMD_PLINKY_PLONKY_INIT, "connected": False, "sock": None, "init_done": False, "reference": 0},
+            "10.10.3.10": {"name": "stand", "required": True, "init": protocol.Cmd.CMD_STAND_INIT, "connected": False, "sock": None, "init_done": False, "reference": 0},
+            "10.10.3.20": {"name": "lift", "required": True, "init": protocol.Cmd.CMD_LIFT_INIT, "connected": False, "sock": None, "init_done": False, "reference": 0},
+            "10.10.3.30": {"name": "plinky-plonky", "required": True, "init": protocol.Cmd.CMD_PLINKY_PLONKY_INIT, "connected": False, "sock": None, "init_done": False, "reference": 0},
             # Doors have index values also
-            "10.10.3.40": {"name": "door 0", "init": protocol.Cmd.CMD_DOOR_INIT, "connected": False, "sock": None, "init_done": False, "reference": 0, "index": 0},
-            "10.10.3.41": {"name": "door 1", "init": protocol.Cmd.CMD_DOOR_INIT, "connected": False, "sock": None, "init_done": False, "reference": 0, "index": 1},
-            "10.10.3.42": {"name": "door 2", "init": protocol.Cmd.CMD_DOOR_INIT, "connected": False, "sock": None, "init_done": False, "reference": 0, "index": 2},
-            "10.10.3.43": {"name": "door 3", "init": protocol.Cmd.CMD_DOOR_INIT, "connected": False, "sock": None, "init_done": False, "reference": 0, "index": 3},
-            "10.10.3.44": {"name": "door 4", "init": protocol.Cmd.CMD_DOOR_INIT, "connected": False, "sock": None, "init_done": False, "reference": 0, "index": 4},
-            "10.10.3.45": {"name": "door 5", "init": protocol.Cmd.CMD_DOOR_INIT, "connected": False, "sock": None, "init_done": False, "reference": 0, "index": 5},
+            "10.10.3.40": {"name": "door 0", "required": True, "init": protocol.Cmd.CMD_DOOR_INIT, "connected": False, "sock": None, "init_done": False, "reference": 0, "index": 0},
+            "10.10.3.41": {"name": "door 1", "required": True, "init": protocol.Cmd.CMD_DOOR_INIT, "connected": False, "sock": None, "init_done": False, "reference": 0, "index": 1},
+            "10.10.3.42": {"name": "door 2", "required": True, "init": protocol.Cmd.CMD_DOOR_INIT, "connected": False, "sock": None, "init_done": False, "reference": 0, "index": 2},
+            "10.10.3.43": {"name": "door 3", "required": True, "init": protocol.Cmd.CMD_DOOR_INIT, "connected": False, "sock": None, "init_done": False, "reference": 0, "index": 3},
+            "10.10.3.44": {"name": "door 4", "required": True, "init": protocol.Cmd.CMD_DOOR_INIT, "connected": False, "sock": None, "init_done": False, "reference": 0, "index": 4},
+            "10.10.3.45": {"name": "door 5", "required": True, "init": protocol.Cmd.CMD_DOOR_INIT, "connected": False, "sock": None, "init_done": False, "reference": 0, "index": 5},
+            "10.10.3.100": {"name": "test", "required": False, "init": protocol.Cmd.CMD_STAND_INIT, "connected": False, "sock": None, "init_done": False, "reference": 0},
         }
 
         # Single unified queue for incoming messages (RspMsg and IndMsg only)
@@ -351,8 +352,8 @@ class Esp32Server:
         CURSOR_START = "\033[0G"
 
         while self.running:
-            all_connected = all(info["connected"] for info in self.devices.values())
-            all_initialized = all(info["init_done"] for info in self.devices.values())
+            all_connected = all(info["connected"] for info in self.devices.values() if info["required"])
+            all_initialized = all(info["init_done"] for info in self.devices.values() if info["required"])
 
             if all_connected and all_initialized:
                 elapsed = time.time() - start_time

@@ -122,15 +122,52 @@
 // so that we are able to move away from it.
 #define HYSTERESIS_PLINKY_PLONKY_MS 500
 
+// Idle time before TCP keep-alive kicks in, in seconds.
+#define TCP_KEEP_ALIVE_IDLE_TIME_SECONDS   20
+
+// Idle time before TCP keep-alive kicks in, in seconds.
+#define TCP_KEEP_ALIVE_PROBE_INTERVAL_SECONDS   10
+
+// The number of TCP probes to lose before considering the connection dead.
+#define TCP_KEEP_ALIVE_COUNT   3
+
+# if 0
+// Take the production sempahore.
+#  define PRODUCTION_CONTEXT_LOCK(semaphore, dbg)    {                                             \
+                                                         ESP_LOGI(TAG, "+SEM 0 %s", dbg);          \
+                                                         xSemaphoreTake(semaphore, portMAX_DELAY); \
+                                                         ESP_LOGI(TAG, "+SEM 1 %s", dbg)
+
+// Give the production sempahore.
+#  define PRODUCTION_CONTEXT_UNLOCK(semaphore, dbg)      ESP_LOGI(TAG, "-SEM 1 %s", dbg);          \
+                                                         xSemaphoreGive(semaphore);                \
+                                                         ESP_LOGI(TAG, "-SEM 0 %s", dbg);          \
+                                                     }
+#else
+// Take the production sempahore.
+#  define PRODUCTION_CONTEXT_LOCK(semaphore, dbg)    {                                             \
+                                                         xSemaphoreTake(semaphore, portMAX_DELAY)
+
+// Give the production sempahore.
+#  define PRODUCTION_CONTEXT_UNLOCK(semaphore, dbg)      xSemaphoreGive(semaphore);                \
+                                                     }
+#endif
+
+// Retry count for socket sends.
+#define SOCKET_TX_RETRY_COUNT 100
+
+// Socket timeout (use 0 for none).
+#define SOCKET_TIMEOUT_SECONDS 5
+
 /* ----------------------------------------------------------------
  * TYPES
  * -------------------------------------------------------------- */
 
 // Production mode message parser state.
 typedef enum {
-  MSG_PARSER_STATE_NEED_MAGIC = 0,
-  MSG_PARSER_STATE_NEED_CMD_BODY,
-  MSG_PARSER_STATE_NEED_QRY_BODY
+    MSG_PARSER_STATE_NEED_MAGIC = 0,
+    MSG_PARSER_STATE_NEED_CMD_BODY,
+    MSG_PARSER_STATE_NEED_QRY_BODY
 } msg_parser_state_t;
 
 // Structure to hold a received command or query.
@@ -1075,15 +1112,27 @@ static esp_err_t send_tx_data(uint8_t *buffer, size_t len, int socket)
 {
     esp_err_t err = ESP_OK;
     size_t total_written = 0;
+    size_t retry_count = 0;
 
-    while ((total_written < len) && (err == ESP_OK)) {
+    while ((total_written < len) && (err == ESP_OK) && (retry_count < SOCKET_TX_RETRY_COUNT)) {
         int32_t len_written = send(socket, buffer + total_written, len - total_written, 0);
         if (len_written >= 0) {
             total_written += len_written;
+            retry_count = 0;  // Reset on success
         } else {
-            err = -errno;
-            ESP_LOGE(TAG, "Error sending to server %d (%s)!", errno, strerror(errno));
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                retry_count++;
+                vTaskDelay(pdMS_TO_TICKS(10));  // Small delay before retry
+            } else {
+                err = -errno;
+                ESP_LOGE(TAG, "Error sending to server %d (%s)!", errno, strerror(errno));
+            }
         }
+    }
+
+    if (retry_count >= SOCKET_TX_RETRY_COUNT) {
+        ESP_LOGE(TAG, "Send timeout after %d retries.", SOCKET_TX_RETRY_COUNT);
+        err = ESP_ERR_TIMEOUT;
     }
 
     return err;
@@ -1371,7 +1420,7 @@ static void monitor_task(void *arg)
     // Allow us to feed the watchdog
     esp_task_wdt_add(NULL);
 
-    xSemaphoreTake(context->lock, portMAX_DELAY);
+    PRODUCTION_CONTEXT_LOCK(context->lock, "monitor_task() 1");
 
     // Set up the initial shadow sensor values
     context_sensor->is_down = is_down();
@@ -1379,12 +1428,12 @@ static void monitor_task(void *arg)
     context_sensor->is_at_reference = is_at_reference();
     context_sensor->is_open = is_open();
 
-    xSemaphoreGive(context->lock);
+    PRODUCTION_CONTEXT_UNLOCK(context->lock, "monitor_task() 1");
 
     // Main monitoring loop
     while (context->running) {
 
-        xSemaphoreTake(context->lock, portMAX_DELAY);
+        PRODUCTION_CONTEXT_LOCK(context->lock, "monitor_task() 2");
 
         // Read all of the sensors and send indications
         // as necessary
@@ -1453,7 +1502,7 @@ static void monitor_task(void *arg)
             }
         }
 
-        xSemaphoreGive(context->lock);
+        PRODUCTION_CONTEXT_UNLOCK(context->lock, "monitor_task() 2");
 
         esp_task_wdt_reset();
 
@@ -1525,27 +1574,115 @@ static int32_t answer_qry(qry_t qry, int32_t *value,
 }
 
 // Set socket to non-blocking mode.
-static esp_err_t set_socket_non_blocking(int sock) {
+static esp_err_t set_socket_non_blocking(int sock)
+{
+    esp_err_t err = ESP_OK;
+    int flags;
+
     if (sock < 0) {
         ESP_LOGE(TAG, "Invalid socket descriptor");
-        return ESP_FAIL;
+        err = ESP_FAIL;
     }
 
-    // Get current flags
-    int flags = fcntl(sock, F_GETFL, 0);
-    if (flags < 0) {
-        ESP_LOGE(TAG, "fcntl F_GETFL failed: %d (%s)", errno, strerror(errno));
-        return ESP_FAIL;
+    if (err == ESP_OK) {
+        // Get current flags
+        flags = fcntl(sock, F_GETFL, 0);
+        if (flags < 0) {
+            ESP_LOGE(TAG, "fcntl F_GETFL failed: %d (%s)!", errno, strerror(errno));
+            err = ESP_FAIL;
+        }
     }
 
-    // Set the non-blocking flag
-    if (fcntl(sock, F_SETFL, flags | O_NONBLOCK) < 0) {
-        ESP_LOGE(TAG, "fcntl F_SETFL (non-blocking) failed: %d (%s)", errno, strerror(errno));
-        return ESP_FAIL;
+    if (err == ESP_OK) {
+        // Set the non-blocking flag
+        if (fcntl(sock, F_SETFL, flags | O_NONBLOCK) < 0) {
+            ESP_LOGE(TAG, "fcntl F_SETFL (non-blocking) failed: %d (%s)!", errno, strerror(errno));
+            err = ESP_FAIL;
+        }
     }
 
-    ESP_LOGD(TAG, "Socket %d set to non-blocking mode", sock);
-    return ESP_OK;
+#if SOCKET_TIMEOUT_SECONDS > 0
+    if (err == ESP_OK) {
+        // Also set send and receive timeouts, otherwise it is
+        // still possible to get stuck in a socket if the far
+        // end doesn't clear a socket tidily (e.g. Raspberry Pi reboot)
+        struct timeval tv;
+        tv.tv_sec = SOCKET_TIMEOUT_SECONDS;
+        tv.tv_usec = 0;
+        if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) != 0) {
+            ESP_LOGE(TAG, "Failed to set SO_RCVTIMEO: %d (%s)!", errno, strerror(errno));
+            err = ESP_FAIL;
+        }
+
+        if (err == ESP_OK) {
+            // Set send timeout
+            if (setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) != 0) {
+                ESP_LOGE(TAG, "Failed to set SO_SNDTIMEO: %d (%s)!", errno, strerror(errno));
+                err = ESP_FAIL;
+            }
+        }
+        if (err == ESP_OK) {
+            ESP_LOGD(TAG, "Socket %d set to have %d second Rx and Tx timeouts.",
+                     sock, SOCKET_TIMEOUT_SECONDS);
+        }
+    }
+#endif
+
+    if (err == ESP_OK) {
+        ESP_LOGD(TAG, "Socket %d set to non-blocking mode.", sock);
+    }
+
+    return err;
+}
+
+// Enable TCP keep-alive: this allows us to detect a failure
+// of Wi-Fi or of our controlling entity and fall back to
+// asking for a reconnection.
+static esp_err_t enable_tcp_keepalive(int sock)
+{
+    esp_err_t err = ESP_OK;
+
+    // Enable keep-alive
+    int x = 1;
+    if (setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE, &x, sizeof(x)) != 0) {
+        ESP_LOGE(TAG, "Failed to set SO_KEEPALIVE: %d", errno);
+        err = ESP_FAIL;
+    }
+
+    if (err == ESP_OK) {
+        // Set idle time before keep-alive kicks in
+        x = TCP_KEEP_ALIVE_IDLE_TIME_SECONDS;
+        if (setsockopt(sock, IPPROTO_TCP, TCP_KEEPIDLE, &x, sizeof(x)) != 0) {
+            ESP_LOGE(TAG, "Failed to set TCP_KEEPIDLE: %d", errno);
+            err = ESP_FAIL;
+        }
+    }
+
+    if (err == ESP_OK) {
+        // Set keep-alive interval
+        x = TCP_KEEP_ALIVE_PROBE_INTERVAL_SECONDS;
+        if (setsockopt(sock, IPPROTO_TCP, TCP_KEEPINTVL, &x, sizeof(x)) != 0) {
+            ESP_LOGE(TAG, "Failed to set TCP_KEEPINTVL: %d", errno);
+            err = ESP_FAIL;
+        }
+    }
+
+    if (err == ESP_OK) {
+        x = TCP_KEEP_ALIVE_COUNT;
+        // Set keep-alive count
+        if (setsockopt(sock, IPPROTO_TCP, TCP_KEEPCNT, &x, sizeof(x)) != 0) {
+            ESP_LOGE(TAG, "Failed to set TCP_KEEPCNT: %d", errno);
+            err = ESP_FAIL;
+        }
+    }
+
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "TCP keep-alive enabled: detection time ~%d seconds.",
+                TCP_KEEP_ALIVE_IDLE_TIME_SECONDS +
+                (TCP_KEEP_ALIVE_PROBE_INTERVAL_SECONDS * TCP_KEEP_ALIVE_COUNT));
+    }
+
+   return err;
 }
 
 // Process a buffer of received data, decrementing the contents of
@@ -1646,68 +1783,87 @@ static void comms_rx_task(void *arg)
     // Main command processing loop
     while (context->running) {
 
-        xSemaphoreTake(context->lock, portMAX_DELAY);
+        PRODUCTION_CONTEXT_LOCK(context->lock, "comms_rx_task()");
 
-        // We will be receiving either a command or a query
-        uint8_t buffer[PROTOCOL_ESP32_MAX_RX_LEN];
-        // Non-blocking receive
-        int32_t err = recv(context->socket, &buffer, sizeof(buffer), 0);
-        if (err > 0) {
-            // Process received data
-            ESP_LOGD(TAG, "Received %d byte(s) from server:", err);
-            char debug_buffer[128];
-            hex_dump_to_buffer(buffer, err, debug_buffer, sizeof(debug_buffer));
-            ESP_LOGD(TAG, "%s", debug_buffer);
-            while (err > 0) {
-                cmd_or_qry_t *cmd_or_qry = process_rx_data(buffer, &err, &context->context_parser);
-                if (cmd_or_qry) {
-                    bool and_reboot = false;
-                    if (!cmd_or_qry->cmd_not_qry) {
-                        // Got a query, get the answer
-                        int32_t value = 0;
-                        rsp.reference = cmd_or_qry->qry.reference;
-                        rsp.cmd_or_qry = cmd_or_qry->qry.query;
-                        rsp.status = answer_qry(cmd_or_qry->qry.query, &value,
-                                                &context->context_state);
-                        rsp.value = value;
-                    } else {
-                        // Got a command: set it in motion
-                        rsp.reference = cmd_or_qry->cmd.reference;
-                        rsp.cmd_or_qry = cmd_or_qry->cmd.command;
-                        rsp.status = do_cmd(&cmd_or_qry->cmd, context, &and_reboot);
-                    }
-                    // Send the response.
-                    send_tx_data((uint8_t *) &rsp, sizeof(rsp), context->socket);
-                    if (and_reboot) {
-                        // Goin' down...
-                        ESP_LOGW(TAG, "Rebooting in a few seconds...");
-                        vTaskDelay(pdMS_TO_TICKS(2000));
-                        tmc2209_deinit();
-                        log_deinit();
-                        network_deinit();
-                        esp_restart();
+        // Use select() to check socket state before recv()
+        // this reduces the chances of us getting stuck
+        // if the far end doesn't close a socket nicely
+        fd_set readfds;
+        FD_ZERO(&readfds);
+        FD_SET(context->socket, &readfds);
+
+        struct timeval tv;
+        tv.tv_sec = 0;
+        tv.tv_usec = 100000; // 100 ms select timeout
+        int select_ret = select(context->socket + 1, &readfds, NULL, NULL, &tv);
+        if (select_ret < 0) {
+            // select error - connection likely dead
+            ESP_LOGE(TAG, "select() failed: %d (%s)!", errno, strerror(errno));
+            context->connected = false;
+        } else if (select_ret == 0) {
+            // No data available, still connected
+        } else {
+            // We will be receiving either a command or a query
+            uint8_t buffer[PROTOCOL_ESP32_MAX_RX_LEN];
+            // Non-blocking receive
+            int32_t err = recv(context->socket, &buffer, sizeof(buffer), 0);
+            if (err > 0) {
+                // Process received data
+                ESP_LOGD(TAG, "Received %d byte(s) from server:", err);
+                char debug_buffer[128];
+                hex_dump_to_buffer(buffer, err, debug_buffer, sizeof(debug_buffer));
+                ESP_LOGD(TAG, "%s", debug_buffer);
+                while (err > 0) {
+                    cmd_or_qry_t *cmd_or_qry = process_rx_data(buffer, &err, &context->context_parser);
+                    if (cmd_or_qry) {
+                        bool and_reboot = false;
+                        if (!cmd_or_qry->cmd_not_qry) {
+                            // Got a query, get the answer
+                            int32_t value = 0;
+                            rsp.reference = cmd_or_qry->qry.reference;
+                            rsp.cmd_or_qry = cmd_or_qry->qry.query;
+                            rsp.status = answer_qry(cmd_or_qry->qry.query, &value,
+                                                    &context->context_state);
+                            rsp.value = value;
+                        } else {
+                            // Got a command: set it in motion
+                            rsp.reference = cmd_or_qry->cmd.reference;
+                            rsp.cmd_or_qry = cmd_or_qry->cmd.command;
+                            rsp.status = do_cmd(&cmd_or_qry->cmd, context, &and_reboot);
+                        }
+                        // Send the response.
+                        send_tx_data((uint8_t *) &rsp, sizeof(rsp), context->socket);
+                        if (and_reboot) {
+                            // Goin' down...
+                            ESP_LOGW(TAG, "Rebooting in a few seconds...");
+                            vTaskDelay(pdMS_TO_TICKS(2000));
+                            tmc2209_deinit();
+                            log_deinit();
+                            network_deinit();
+                            esp_restart();
+                        }
                     }
                 }
-            }
-        } else if (err == 0) {
-            // Connection closed by peer
-            ESP_LOGI(TAG, "Connection closed by peer!");
-            context->connected = false;
-        } else {
-            // Error or would block
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                // No data available right now - this is expected in non-blocking mode
-                // Just yield to allow other tasks to run
-                nothing_received_count++;
-                vTaskDelay(pdMS_TO_TICKS(WATCHDOG_FEED_TIME_MS));
-            } else {
-                // Real error occurred
-                ESP_LOGE(TAG, "recv() failed %d (%s)!", errno, strerror(errno));
+            } else if (err == 0) {
+                // Connection closed by peer
+                ESP_LOGI(TAG, "Connection closed by peer!");
                 context->connected = false;
+            } else {
+                // Error or would block
+                if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    // No data available right now - this is expected in non-blocking mode
+                    // Just yield to allow other tasks to run
+                    nothing_received_count++;
+                    vTaskDelay(pdMS_TO_TICKS(WATCHDOG_FEED_TIME_MS));
+                } else {
+                    // Real error occurred
+                    ESP_LOGE(TAG, "recv() failed %d (%s)!", errno, strerror(errno));
+                    context->connected = false;
+                }
             }
         }
 
-        xSemaphoreGive(context->lock);
+        PRODUCTION_CONTEXT_UNLOCK(context->lock, "comms_rx_task()");
 
         esp_task_wdt_reset();
 
@@ -1764,10 +1920,54 @@ static void debounce_callback(void* arg)
 #  endif
 }
 
+// Create a socket and form a TCP connection to the given server/port.
+static esp_err_t connect_to_server(const char *server_ip, uint16_t port,
+                                   int *sock, struct sockaddr_in *server)
+{
+    // Create a TCP socket for comms with the server
+    esp_err_t err = ESP_FAIL;
+    *sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
+    if (*sock >= 0) {
+        err = ESP_OK;
+        // Configure server address
+        server->sin_family = AF_INET;
+        server->sin_port = htons(port);
+        inet_pton(AF_INET, server_ip, &server->sin_addr);
+
+        ESP_LOGI(TAG, "Connecting to %s:%d...",  server_ip, port);
+
+        // Connect to the server
+        err = connect(*sock, (struct sockaddr *) server, sizeof(*server));
+        if (err == 0) {
+            // Put socket into non-blocking mode as we don't want to
+            // get stuck in a recv()
+            err = set_socket_non_blocking(*sock);
+            if (err == ESP_OK) {
+                // Set a keep-alive so that we realise when the
+                // connection has dropped relatively quickly
+                err = enable_tcp_keepalive(*sock);
+            }
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to set socket options!");
+            }
+        } else {
+            err = ESP_FAIL;
+            ESP_LOGE(TAG, "Failed to connect to server %d (%s)!", errno, strerror(errno));
+        }
+    } else {
+        err = ESP_FAIL;
+        ESP_LOGE(TAG, "Unable to create socket %d (%s)!", errno, strerror(errno));
+    }
+
+    return err;
+}
+
 // Production mode.
 static void do_production(const char *server_ip, uint16_t port)
 {
     context_debounce_t *context_debounce = &g_context_production.context_debounce;
+    esp_err_t err = ESP_FAIL;
 
     ESP_LOGI(TAG, "PRODUCTION MODE");
 
@@ -1777,7 +1977,7 @@ static void do_production(const char *server_ip, uint16_t port)
     }
     if (g_context_production.lock) {
 
-        xSemaphoreTake(g_context_production.lock, portMAX_DELAY);
+        PRODUCTION_CONTEXT_LOCK(g_context_production.lock, "do_production() 1");
 
         // Start a timer to read the sensor pins and debounce them
         context_debounce->timer_args.callback = debounce_callback;
@@ -1786,8 +1986,8 @@ static void do_production(const char *server_ip, uint16_t port)
         context_debounce->timer_args.name = "debounce";
         context_debounce->timer_args.skip_unhandled_events = false;
         context_debounce->timer_handle = NULL;
-        esp_err_t err = esp_timer_create(&context_debounce->timer_args,
-                                          &context_debounce->timer_handle);
+        err = esp_timer_create(&context_debounce->timer_args,
+                               &context_debounce->timer_handle);
         if (err == ESP_OK) {
             err = esp_timer_start_periodic(context_debounce->timer_handle,
                                            DEBOUNCE_CHECK_PERIOD_US);
@@ -1798,100 +1998,85 @@ static void do_production(const char *server_ip, uint16_t port)
         }
         if (err >= 0) {
             g_context_production.socket = err;
-            err = ESP_OK;
-            // Configure server address
-            g_context_production.server.sin_family = AF_INET;
-            g_context_production.server.sin_port = htons(port);
-            inet_pton(AF_INET, server_ip, &g_context_production.server.sin_addr);
 
-            ESP_LOGI(TAG, "Connecting to %s:%d...",  server_ip, port);
-
-            // Connect to the server
-            err = connect(g_context_production.socket,
-                            (struct sockaddr *) &g_context_production.server,
-                            sizeof(g_context_production.server));
-            if (err == 0) {
+            err = connect_to_server(server_ip, port,
+                                    &g_context_production.socket,
+                                    &g_context_production.server);
+            if (err == ESP_OK) {
                 g_context_production.connected = true;
                 g_context_production.running = true;
-                // Put socket into non-blocking mode as we don't want to
-                // get stuck in a recv()
-                 set_socket_non_blocking(g_context_production.socket);
-            } else {
-                ESP_LOGE(TAG, "Failed to connect to server %d (%s)!", errno, strerror(errno));
             }
-        } else {
-            ESP_LOGE(TAG, "Unable to create socket %d (%s)!", errno, strerror(errno));
         }
 
-        xSemaphoreGive(g_context_production.lock);
-    }
+        PRODUCTION_CONTEXT_UNLOCK(g_context_production.lock, "do_production() 1");
 
-    // Start tasks to receive comms from the server and monitor the operation of commands
-    if (g_context_production.connected &&
-        (xTaskCreate(&monitor_task, "monitor_task", 1024 * 4, &g_context_production, 5, &g_context_production.task_handle_monitor) == pdPASS) &&
-        (xTaskCreate(&comms_rx_task, "comms_rx_task", 1024 * 4, &g_context_production, 5, &g_context_production.task_handle_comms_rx) == pdPASS)) {
-        ESP_LOGI(TAG, "Waiting for commands from server.");
-        while(1) {
-            flash_debug_led(DEBUG_LED_SHORT_MS);
-            vTaskDelay(pdMS_TO_TICKS(1000));
-            if (!g_context_production.connected) {
-                ESP_LOGE(TAG, "Reconnecting to server after error!");
+        // Start tasks to receive comms from the server and monitor the operation of commands
+        if (g_context_production.connected &&
+            (xTaskCreate(&monitor_task, "monitor_task", 1024 * 4, &g_context_production, 5, &g_context_production.task_handle_monitor) == pdPASS) &&
+            (xTaskCreate(&comms_rx_task, "comms_rx_task", 1024 * 4, &g_context_production, 5, &g_context_production.task_handle_comms_rx) == pdPASS)) {
 
-                xSemaphoreTake(g_context_production.lock, portMAX_DELAY);
+            ESP_LOGI(TAG, "Waiting for commands from server.");
 
-                // Close old socket if it exists
-                if (g_context_production.socket >= 0) {
-                    close(g_context_production.socket);
-                    g_context_production.socket = -1;
-                }
+            while(1) {
 
-                // Create new socket
-                g_context_production.socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-                if (g_context_production.socket >= 0) {
-                    if (connect(g_context_production.socket,
-                                (struct sockaddr *) &g_context_production.server,
-                                sizeof(g_context_production.server)) == 0) {
-                        set_socket_non_blocking(g_context_production.socket);
+                flash_debug_led(DEBUG_LED_SHORT_MS);
+                vTaskDelay(pdMS_TO_TICKS(1000));
+
+                if (!g_context_production.connected) {
+                    ESP_LOGE(TAG, "Reconnecting to server after error!");
+
+                    PRODUCTION_CONTEXT_LOCK(g_context_production.lock, "do_production() 2");
+
+                    // Close old socket if it exists
+                    if (g_context_production.socket >= 0) {
+                        close(g_context_production.socket);
+                        g_context_production.socket = -1;
+                    }
+
+                    // Create new connection
+                    err = connect_to_server(server_ip, port,
+                                            &g_context_production.socket,
+                                            &g_context_production.server);
+                    if (err == ESP_OK) {
                         g_context_production.connected = true;
                         ESP_LOGI(TAG, "Reconnected.");
                     } else {
-                        ESP_LOGE(TAG, "Unable to reconnect to server %d (%s)!", errno, strerror(errno));
+                        ESP_LOGE(TAG, "Unable to reconnect to server!");
                     }
-                } else {
-                    ESP_LOGE(TAG, "Unable to create new socket %d (%s)!", errno, strerror(errno));
+
+                    PRODUCTION_CONTEXT_UNLOCK(g_context_production.lock, "do_production() 2");
+
+                    vTaskDelay(pdMS_TO_TICKS(2000));
                 }
-
-                xSemaphoreGive(g_context_production.lock);
-
-                vTaskDelay(pdMS_TO_TICKS(2000));
+                esp_task_wdt_reset();
             }
-            esp_task_wdt_reset();
         }
+
+        // Tidy up
+        g_context_production.running = false;
+
+        PRODUCTION_CONTEXT_LOCK(g_context_production.lock, "do_production() 3");
+
+        close(g_context_production.socket);
+        g_context_production.socket = -1;
+
+        if (g_context_production.task_handle_comms_rx) {
+            vTaskDelete(g_context_production.task_handle_comms_rx);
+        }
+
+        if (g_context_production.task_handle_monitor) {
+            vTaskDelete(g_context_production.task_handle_monitor);
+        }
+
+        if (context_debounce->timer_handle != NULL) {
+            esp_timer_stop(context_debounce->timer_handle);
+            esp_timer_delete(context_debounce->timer_handle);
+        }
+
+        PRODUCTION_CONTEXT_UNLOCK(g_context_production.lock, "do_production() 3");
+
+        // Don't delete the semaphore in case someone has it
     }
-
-    // Tidy up
-    g_context_production.running = false;
-
-    xSemaphoreTake(g_context_production.lock, portMAX_DELAY);
-
-    close(g_context_production.socket);
-    g_context_production.socket = -1;
-
-    if (g_context_production.task_handle_comms_rx) {
-        vTaskDelete(g_context_production.task_handle_comms_rx);
-    }
-
-    if (g_context_production.task_handle_monitor) {
-        vTaskDelete(g_context_production.task_handle_monitor);
-    }
-
-    if (context_debounce->timer_handle != NULL) {
-        esp_timer_stop(context_debounce->timer_handle);
-        esp_timer_delete(context_debounce->timer_handle);
-    }
-
-    xSemaphoreGive(g_context_production.lock);
-    // Don't delete the semaphore in case someone has it
 }
 
 #endif // #if defined(CONFIG_STEPPER_PRODUCTION_MODE)
@@ -1937,7 +2122,7 @@ void app_main(void)
 #  endif
 
         if (err == ESP_OK) {
-            // Test mode only
+            // Production mode
             do_production(CONFIG_STEPPER_PRODUCTION_SERVER, CONFIG_STEPPER_PRODUCTION_PORT);
         }
 #else
