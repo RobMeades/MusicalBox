@@ -1008,7 +1008,7 @@ class WebControlInterface:
                 </div>
                 <div class="settings-row">
                     <span class="label">Interval (seconds):</span>
-                    <input type="number" id="interval" value="300" min="10" step="10" onblur="setInterval(this.value)">
+                    <input type="number" id="interval" value="300" min="10" step="10" onchange="setInterval(this.value)">
                     <span>seconds</span>
                 </div>
                 <div class="settings-row">
@@ -1053,6 +1053,24 @@ class WebControlInterface:
         // Variables to track auto-scroll
         let autoScrollEnabled = true;
         let debugWindowScrollTimeout = null;
+
+        // Variables to track user interactions
+        let settingsPanelLocked = false;
+        let settingsPanelTimeout = null;
+
+        // Track the pending auto-run state
+        let pendingAutoRun = null;
+        let pendingInterval = null;
+        let pendingSequence = null;
+
+        // Function to lock the settings panel during user interaction
+        function lockSettingsPanel() {
+            settingsPanelLocked = true;
+            if (settingsPanelTimeout) clearTimeout(settingsPanelTimeout);
+            settingsPanelTimeout = setTimeout(() => {
+                settingsPanelLocked = false;
+            }, 1000); // Unlock after 1 second of no interaction
+        }
 
         function setupDebugWindow() {
             const debugWindow = document.getElementById('debugWindow');
@@ -1131,6 +1149,15 @@ class WebControlInterface:
             document.body.removeChild(textarea);
         }
 
+        function setupSettingsPanel() {
+            const settingsInputs = document.querySelectorAll('.settings-column input, .settings-column select');
+            settingsInputs.forEach(input => {
+                input.addEventListener('focus', lockSettingsPanel);
+                input.addEventListener('click', lockSettingsPanel);
+                input.addEventListener('change', lockSettingsPanel);
+            });
+        }
+
         async function sendCommand(cmd, params = {}) {
             try {
                 const response = await fetch('/api/command', {
@@ -1153,38 +1180,75 @@ class WebControlInterface:
         }
 
         async function setAutoRun(enabled) {
+            // Set pending state immediately to prevent UI from being overwritten
+            pendingAutoRun = enabled;
+            
+            // Immediately update the UI to reflect user's choice
+            document.querySelector(`input[name="auto_enabled"][value="true"]`).checked = enabled;
+            document.querySelector(`input[name="auto_enabled"][value="false"]`).checked = !enabled;
+            
+            // Also update the status display
+            const autoStatusDiv = document.getElementById('autoStatus');
+            if (autoStatusDiv) {
+                autoStatusDiv.className = `status ${enabled ? 'running' : 'idle'}`;
+                autoStatusDiv.innerHTML = enabled ? 
+                    `🔄 Auto-run: pending...` : 
+                    `⏸️ Auto-run: pending...`;
+            }
+            
             try {
                 await fetch('/api/settings', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({auto_run_enabled: enabled})
                 });
+                // Clear pending state on success
+                pendingAutoRun = null;
             } catch (e) {
                 console.error(`Error setting auto-run: ${e.message}`);
+                // Revert on error
+                pendingAutoRun = null;
+                // Force a status update to revert the UI
+                if (statusSource) {
+                    // Status will be updated on next SSE message
+                }
             }
         }
 
         async function setInterval(interval) {
+            pendingInterval = interval;
+            const intervalField = document.getElementById('interval');
+            if (intervalField) {
+                intervalField.value = interval;
+            }
+            
             try {
                 await fetch('/api/settings', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({auto_run_interval: parseInt(interval)})
                 });
+                pendingInterval = null;
             } catch (e) {
                 console.error(`Error setting interval: ${e.message}`);
+                pendingInterval = null;
             }
         }
 
         async function setSequence(sequence) {
+            pendingSequence = sequence;
+            document.getElementById('sequence').value = sequence;
+            
             try {
                 await fetch('/api/settings', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({auto_run_sequence: sequence})
                 });
+                pendingSequence = null;
             } catch (e) {
                 console.error(`Error setting sequence: ${e.message}`);
+                pendingSequence = null;
             }
         }
 
@@ -1200,24 +1264,38 @@ class WebControlInterface:
         function updateUI(status) {
             // Update auto-run UI
             const auto = status.auto_run;
-            document.querySelector(`input[name="auto_enabled"][value="${auto.enabled}"]`).checked = auto.enabled;
             
-            // Only update interval value if the field is NOT currently focused
-            const intervalField = document.getElementById('interval');
-            if (intervalField && document.activeElement !== intervalField) {
-                intervalField.value = auto.interval;
+            // Only update settings if there's no pending change
+            if (pendingAutoRun === null && pendingInterval === null && pendingSequence === null && !settingsPanelLocked) {
+
+                // Update radio buttons
+                document.querySelector(`input[name="auto_enabled"][value="true"]`).checked = auto.enabled;
+                document.querySelector(`input[name="auto_enabled"][value="false"]`).checked = !auto.enabled;
+                
+                const intervalField = document.getElementById('interval');
+                if (intervalField && document.activeElement !== intervalField) {
+                    intervalField.value = auto.interval;
+                }
+                
+                document.getElementById('sequence').value = auto.sequence;
             }
             
-            document.getElementById('sequence').value = auto.sequence;
-            
+            // Always update the status display (this doesn't affect user input)            
             const autoStatusDiv = document.getElementById('autoStatus');
             if (autoStatusDiv) {
                 autoStatusDiv.className = `status ${auto.enabled ? 'running' : 'idle'}`;
-                autoStatusDiv.innerHTML = auto.enabled ? 
-                    `🔄 Auto-run: ${auto.sequence} every ${auto.interval}s` : 
-                    `⏸️ Auto-run: Disabled`;
-            }
-            
+                // Show "pending" message if we're waiting for confirmation
+                if (pendingAutoRun !== null) {
+                    autoStatusDiv.innerHTML = pendingAutoRun ? 
+                        `🔄 Auto-run: enabling...` : 
+                        `⏸️ Auto-run: disabling...`;
+                } else {
+                    autoStatusDiv.innerHTML = auto.enabled ? 
+                        `🔄 Auto-run: ${auto.sequence} every ${auto.interval}s` : 
+                        `⏸️ Auto-run: Disabled`;
+                }
+            }            
+
             // Update operation status
             const op = status.current_operation;
             const opStatusDiv = document.getElementById('operationStatus');
@@ -1448,6 +1526,7 @@ class WebControlInterface:
         // Start the streams
         // Add a small delay before starting SSE to ensure page is fully loaded
         setTimeout(() => {
+            setupSettingsPanel();
             setupStatusStream();
             setupLogsStream();
         }, 1000);

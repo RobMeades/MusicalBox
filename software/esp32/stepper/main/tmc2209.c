@@ -257,7 +257,7 @@ static esp_err_t read(int32_t address, int32_t reg, uint32_t *data)
                 }
             } else {
                 err = -ESP_ERR_INVALID_CRC;
-                ESP_LOGE(TAG, "CRC failure: expected 0x%02x, got 0x%02x).",
+                ESP_LOGE(TAG, "CRC failure: expected 0x%02x, got 0x%02x.",
                          crc, *(p + sizeof(datagram) - 1));
             }
         } else {
