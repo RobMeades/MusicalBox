@@ -164,4 +164,5 @@ If your \[ESP32\] connected devices are able to send their log messages to this 
 
   `sudo systemctl enable log_server`
 
-
+# X Server Setup
+Follow the pattern above to set up anything (e.g. `web_server.py` for the control interface to the musical box) as a run-from-boot service on the Pi.
