@@ -40,17 +40,17 @@ class Esp32Server:
     def __init__(self):
         # Your known devices (fixed IPs)
         self.devices = {
-            "10.10.3.10": {"name": "stand", "required": True, "init": protocol.Cmd.CMD_STAND_INIT, "connected": False, "sock": None, "init_done": False, "reference": 0},
-            "10.10.3.20": {"name": "lift", "required": True, "init": protocol.Cmd.CMD_LIFT_INIT, "connected": False, "sock": None, "init_done": False, "reference": 0},
-            "10.10.3.30": {"name": "plinky-plonky", "required": True, "init": protocol.Cmd.CMD_PLINKY_PLONKY_INIT, "connected": False, "sock": None, "init_done": False, "reference": 0},
+            "10.10.3.10": {"name": "stand", "required": True, "init": protocol.Cmd.CMD_STAND_INIT, "connected": False, "sock": None, "initialised": False, "reference": 0},
+            "10.10.3.20": {"name": "lift", "required": True, "init": protocol.Cmd.CMD_LIFT_INIT, "connected": False, "sock": None, "initialised": False, "reference": 0},
+            "10.10.3.30": {"name": "plinky-plonky", "required": True, "init": protocol.Cmd.CMD_PLINKY_PLONKY_INIT, "connected": False, "sock": None, "initialised": False, "reference": 0},
             # Doors have index values also
-            "10.10.3.40": {"name": "door 0", "required": True, "init": protocol.Cmd.CMD_DOOR_INIT, "connected": False, "sock": None, "init_done": False, "reference": 0, "index": 0},
-            "10.10.3.41": {"name": "door 1", "required": True, "init": protocol.Cmd.CMD_DOOR_INIT, "connected": False, "sock": None, "init_done": False, "reference": 0, "index": 1},
-            "10.10.3.42": {"name": "door 2", "required": True, "init": protocol.Cmd.CMD_DOOR_INIT, "connected": False, "sock": None, "init_done": False, "reference": 0, "index": 2},
-            "10.10.3.43": {"name": "door 3", "required": True, "init": protocol.Cmd.CMD_DOOR_INIT, "connected": False, "sock": None, "init_done": False, "reference": 0, "index": 3},
-            "10.10.3.44": {"name": "door 4", "required": True, "init": protocol.Cmd.CMD_DOOR_INIT, "connected": False, "sock": None, "init_done": False, "reference": 0, "index": 4},
-            "10.10.3.45": {"name": "door 5", "required": True, "init": protocol.Cmd.CMD_DOOR_INIT, "connected": False, "sock": None, "init_done": False, "reference": 0, "index": 5},
-            "10.10.3.100": {"name": "test", "required": False, "init": protocol.Cmd.CMD_STAND_INIT, "connected": False, "sock": None, "init_done": False, "reference": 0},
+            "10.10.3.40": {"name": "door 0", "required": True, "init": protocol.Cmd.CMD_DOOR_INIT, "connected": False, "sock": None, "initialised": False, "reference": 0, "index": 0},
+            "10.10.3.41": {"name": "door 1", "required": True, "init": protocol.Cmd.CMD_DOOR_INIT, "connected": False, "sock": None, "initialised": False, "reference": 0, "index": 1},
+            "10.10.3.42": {"name": "door 2", "required": True, "init": protocol.Cmd.CMD_DOOR_INIT, "connected": False, "sock": None, "initialised": False, "reference": 0, "index": 2},
+            "10.10.3.43": {"name": "door 3", "required": True, "init": protocol.Cmd.CMD_DOOR_INIT, "connected": False, "sock": None, "initialised": False, "reference": 0, "index": 3},
+            "10.10.3.44": {"name": "door 4", "required": True, "init": protocol.Cmd.CMD_DOOR_INIT, "connected": False, "sock": None, "initialised": False, "reference": 0, "index": 4},
+            "10.10.3.45": {"name": "door 5", "required": True, "init": protocol.Cmd.CMD_DOOR_INIT, "connected": False, "sock": None, "initialised": False, "reference": 0, "index": 5},
+            "10.10.3.100": {"name": "test", "required": False, "init": protocol.Cmd.CMD_STAND_INIT, "connected": False, "sock": None, "initialised": False, "reference": 0},
         }
 
         # Single unified queue for incoming messages (RspMsg and IndMsg only)
@@ -129,8 +129,8 @@ class Esp32Server:
         # Check if this response matches our pending init
         if msg.reference == expected_ref and msg.cmd_or_qry == expected_cmd:
             if msg.status == protocol.Status.STATUS_OK:
-                print(f"✓ {self.devices[ip]['name']} initialized successfully")
-                self.devices[ip]["init_done"] = True
+                print(f"✓ {self.devices[ip]['name']} initialised successfully")
+                self.devices[ip]["initialised"] = True
             else:
                 print(f"✗ {self.devices[ip]['name']} initialization failed with status {protocol.Status(msg.status).name}")
 
@@ -157,7 +157,7 @@ class Esp32Server:
                             # Known device - accept
                             self.devices[client_ip]["connected"] = True
                             self.devices[client_ip]["sock"] = client_sock
-                            self.devices[client_ip]["init_done"] = False  # Reset init flag
+                            self.devices[client_ip]["initialised"] = False  # Reset init flag
                             self.socket_list.append(client_sock)
                             self.device_sockets[client_sock] = client_ip
                             self.socket_buffers[client_sock] = b""  # Initialize buffer
@@ -264,7 +264,7 @@ class Esp32Server:
         if ip in self.devices:
             self.devices[ip]["connected"] = False
             self.devices[ip]["sock"] = None
-            self.devices[ip]["init_done"] = False
+            self.devices[ip]["initialised"] = False
             print(f"{self.devices[ip]['name']} disconnected")
 
         # Clean up pending init
@@ -283,15 +283,43 @@ class Esp32Server:
         except:
             pass
 
+    def _print_waiting_status(self, final=False, elapsed=0):
+        """Print the current waiting status on a single line"""
+        waiting_connect = []
+        waiting_init = []
+
+        for ip, info in self.devices.items():
+            if not info["connected"]:
+                waiting_connect.append(f"{info['name']} [{ip}]")
+            elif not info["initialised"]:
+                waiting_init.append(f"{info['name']} [{ip}]")
+
+        CLEAR_LINE = "\033[2K"
+        CURSOR_START = "\033[0G"
+
+        if waiting_connect or waiting_init:
+            status_parts = []
+            if waiting_connect:
+                status_parts.append(f"{', '.join(waiting_connect)}")
+            if waiting_init:
+                status_parts.append(f"initializing {', '.join(waiting_init)}")
+
+            status = f"⏳ [{elapsed:.0f}s] Waiting for: {'; '.join(status_parts)}"
+
+            if final:
+                print(f"{CLEAR_LINE}{CURSOR_START}{status}")
+            else:
+                print(f"{CLEAR_LINE}{CURSOR_START}{status}", end='', flush=True)
+
     def send_command(self, ip: str, command: protocol.CmdMsg) -> bool:
         """
         Send a command message to a specific device
         """
         if ip in self.devices and self.devices[ip]["connected"]:
-            # Check if device is initialized (unless this IS the init command)
+            # Check if device is initialised (unless this IS the init command)
             if command.command not in [info["init"] for info in self.devices.values()]:
-                if not self.devices[ip]["init_done"]:
-                    print(f"Warning: {self.devices[ip]['name']} not yet initialized")
+                if not self.devices[ip]["initialised"]:
+                    print(f"Warning: {self.devices[ip]['name']} not yet initialised")
                     return False
 
             try:
@@ -313,9 +341,9 @@ class Esp32Server:
         Send a query message to a specific device
         """
         if ip in self.devices and self.devices[ip]["connected"]:
-            # Check if device is initialized
-            if not self.devices[ip]["init_done"]:
-                print(f"Warning: {self.devices[ip]['name']} not yet initialized")
+            # Check if device is initialised
+            if not self.devices[ip]["initialised"]:
+                print(f"Warning: {self.devices[ip]['name']} not yet initialised")
                 return False
 
             try:
@@ -330,7 +358,7 @@ class Esp32Server:
         """Send command to all connected devices"""
         results = {}
         for ip, info in self.devices.items():
-            if info["connected"] and info["init_done"]:
+            if info["connected"] and info["initialised"]:
                 results[ip] = self.send_command(ip, command)
         return results
 
@@ -338,13 +366,30 @@ class Esp32Server:
         """Send query to all connected devices"""
         results = {}
         for ip, info in self.devices.items():
-            if info["connected"] and info["init_done"]:
+            if info["connected"] and info["initialised"]:
                 results[ip] = self.send_query(ip, query)
         return results
 
+    def get_device_ip_list(self, required=False, connected=False, initialised=False):
+        """Return list of device IPs"""
+        return [ip for ip, info in self.devices.items() if (not required or info["required"])         \
+                                                           and (not connected or info["connected"])       \
+                                                           and (not initialised or info["initialised"])]
+
+    def device_count(self, required=False, connected=False, initialised=False):
+        return len(self.get_device_ip_list(required, connected, initialised))
+
+    def is_device_connected(self, ip):
+        """Check if a specific device is connected"""
+        return ip in self.devices and self.devices[ip]["connected"]
+
+    def is_device_initialised(self, ip):
+        """Check if a specific device is initialised"""
+        return ip in self.devices and self.devices[ip]["initialised"]
+
     def wait_for_all_devices(self, timeout=None):
-        """Block until all known devices are connected AND initialized"""
-        print("Waiting for all devices to connect and initialize...")
+        """Block until all known devices are connected AND initialised"""
+        print("Waiting for all devices to connect and initialise...")
         start_time = time.time()
         last_print_time = 0
 
@@ -352,12 +397,12 @@ class Esp32Server:
         CURSOR_START = "\033[0G"
 
         while self.running:
-            all_connected = all(info["connected"] for info in self.devices.values() if info["required"])
-            all_initialized = all(info["init_done"] for info in self.devices.values() if info["required"])
+            all_connected = (self.device_count(required=True, connected=True) == self.device_count(required=True))
+            all_initialised = (self.device_count(required=True, initialised=True) == self.device_count(required=True))
 
-            if all_connected and all_initialized:
+            if all_connected and all_initialised:
                 elapsed = time.time() - start_time
-                print(f"\nAll devices connected and initialized! (took {elapsed:.1f}s)")
+                print(f"\nAll devices connected and initialised! (took {elapsed:.1f}s)")
                 return True
 
             elapsed = time.time() - start_time
@@ -374,46 +419,6 @@ class Esp32Server:
             time.sleep(1)
 
         return False
-
-    def _print_waiting_status(self, final=False, elapsed=0):
-        """Print the current waiting status on a single line"""
-        waiting_connect = []
-        waiting_init = []
-
-        for ip, info in self.devices.items():
-            if not info["connected"]:
-                waiting_connect.append(f"{info['name']} [{ip}]")
-            elif not info["init_done"]:
-                waiting_init.append(f"{info['name']} [{ip}]")
-
-        CLEAR_LINE = "\033[2K"
-        CURSOR_START = "\033[0G"
-
-        if waiting_connect or waiting_init:
-            status_parts = []
-            if waiting_connect:
-                status_parts.append(f"{', '.join(waiting_connect)}")
-            if waiting_init:
-                status_parts.append(f"initializing {', '.join(waiting_init)}")
-
-            status = f"⏳ [{elapsed:.0f}s] Waiting for: {'; '.join(status_parts)}"
-
-            if final:
-                print(f"{CLEAR_LINE}{CURSOR_START}{status}")
-            else:
-                print(f"{CLEAR_LINE}{CURSOR_START}{status}", end='', flush=True)
-
-    def get_connected_devices(self):
-        """Return list of currently connected device IPs"""
-        return [ip for ip, info in self.devices.items() if info["connected"]]
-
-    def is_device_connected(self, ip):
-        """Check if a specific device is connected"""
-        return ip in self.devices and self.devices[ip]["connected"]
-
-    def is_device_initialized(self, ip):
-        """Check if a specific device is initialized"""
-        return ip in self.devices and self.devices[ip]["init_done"]
 
     def stop(self):
         """Clean shutdown"""

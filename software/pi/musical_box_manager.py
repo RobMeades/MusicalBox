@@ -50,15 +50,15 @@ class MusicalBoxManager(Esp32Server):
         self.log_callback = None
 
         # Track state for each device type
-        self.lift_state = {}  # ip -> current state (from STATE_LIFT_*)
-        self.doors_state = {}  # ip -> current state (from STATE_DOOR_*)
-        self.stand_state = {}  # ip -> current state (from STATE_STAND_*)
-        self.plinky_plonky_state = {}  # ip -> current state (from STATE_PLINKY_PLONKY_*)
+        self._lift_state = {}  # ip -> current state (from STATE_LIFT_*)
+        self._door_state = {}  # ip -> current state (from STATE_DOOR_*)
+        self._stand_state = {}  # ip -> current state (from STATE_STAND_*)
+        self._plinky_plonky_state = {}  # ip -> current state (from STATE_PLINKY_PLONKY_*)
         
         # Track sensor states
-        self.lift_sensors = {}  # ip -> {'down': bool, 'limit': bool}
-        self.door_sensors = {}  # ip -> {'open': bool}
-        self.plinky_plonky_sensors = {}  # ip -> {'reference': bool}
+        self._lift_sensors = {}  # ip -> {'down': bool, 'limit': bool}
+        self._door_sensors = {}  # ip -> {'open': bool}
+        self._plinky_plonky_sensor = {}  # ip -> {'reference': bool}
         
         # Track pending queries (for correlating responses)
         self.pending_queries = {}  # (ip, reference) -> query_type
@@ -149,7 +149,7 @@ class MusicalBoxManager(Esp32Server):
         value = msg.value
         
         print(f"{device_name}: response to {self.formatter.cmd_or_qry(cmd_or_qry)}, "
-              f"ref={ref}: status={self.formatter.status(status)} (value={value:04x})")
+              f"ref={ref}: status={self.formatter.status(status)} (value=0x{value:04x})")
         
         # Check if this is a response to a query we sent
         query_key = (ip, ref)
@@ -170,32 +170,32 @@ class MusicalBoxManager(Esp32Server):
             # This could be for lift, stand, plinky-plonky or door
             # We need to know which device it came from
             if self.is_lift(ip):
-                self.lift_state[ip] = value
+                self._lift_state[ip] = value
                 print(f"  Lift state: {self.formatter.state(value)}")
             elif self.is_stand(ip):
-                self.stand_state[ip] = value
+                self._stand_state[ip] = value
                 print(f"  Stand state: {self.formatter.state(value)}")
             elif self.is_plinky_plonky(ip):
-                self.plinky_plonky_state[ip] = value
+                self._plinky_plonky_state[ip] = value
                 print(f"  Plinky-plonky state: {self.formatter.state(value)}")
             elif self.is_door(ip):
-                self.doors_state[ip] = value
+                self._door_state[ip] = value
                 print(f"  Door {self.which_door(ip)} state: {self.formatter.state(value)}")
         
         elif query_type == protocol.Qry.QRY_LIFT_SENSOR_DOWN:
-            self.lift_sensors.setdefault(ip, {})['down'] = bool(value)
+            self._lift_sensors.setdefault(ip, {})['down'] = bool(value)
             print(f"  Lift down sensor: {'TRIGGERED' if value else 'clear'}")
         
         elif query_type == protocol.Qry.QRY_LIFT_SENSOR_LIMIT:
-            self.lift_sensors.setdefault(ip, {})['limit'] = bool(value)
+            self._lift_sensors.setdefault(ip, {})['limit'] = bool(value)
             print(f"  Lift limit sensor: {'TRIGGERED' if value else 'clear'}")
         
         elif query_type == protocol.Qry.QRY_PLINKY_PLONKY_SENSOR_REFERENCE:
-            self.plinky_plonky_sensors.setdefault(ip, {})['reference'] = bool(value)
+            self._plinky_plonky_sensor.setdefault(ip, {})['reference'] = bool(value)
             print(f"  Plinky reference sensor: {'TRIGGERED' if value else 'clear'}")
         
         elif query_type == protocol.Qry.QRY_DOOR_SENSOR_OPEN:
-            self.door_sensors.setdefault(ip, {})['open'] = bool(value)
+            self._door_sensors.setdefault(ip, {})['open'] = bool(value)
             print(f"  Door open sensor: {'TRIGGERED' if value else 'clear'}")
     
     def _process_indication(self, ip, device_name, msg):
@@ -213,33 +213,33 @@ class MusicalBoxManager(Esp32Server):
                 self.query_door_state(ip)
         
         elif ind == protocol.Ind.IND_DOOR_SENSOR_TRIGGERED_DOOR_OPEN:
-            self.door_sensors.setdefault(ip, {})['open'] = bool(value)
+            self._door_sensors.setdefault(ip, {})['open'] = bool(value)
             # Also update the state if sensor is triggered (door is definitely open)
             if value:
-                self.doors_state[ip] = protocol.State.STATE_DOOR_STOPPED_OPEN
+                self._door_state[ip] = protocol.State.STATE_DOOR_STOPPED_OPEN
 
         elif ind == protocol.Ind.IND_LIFT_SENSOR_TRIGGERED_LIFT_DOWN:
-            self.lift_sensors.setdefault(ip, {})['down'] = bool(value)
+            self._lift_sensors.setdefault(ip, {})['down'] = bool(value)
             if value:
-                self.lift_state[ip] = protocol.State.STATE_LIFT_STOPPED_DOWN
+                self._lift_state[ip] = protocol.State.STATE_LIFT_STOPPED_DOWN
         
         elif ind == protocol.Ind.IND_LIFT_SENSOR_TRIGGERED_LIFT_LIMIT:
-            self.lift_sensors.setdefault(ip, {})['limit'] = bool(value)
+            self._lift_sensors.setdefault(ip, {})['limit'] = bool(value)
             if value:
-                self.lift_state[ip] = protocol.State.STATE_LIFT_STOPPED_UP
+                self._lift_state[ip] = protocol.State.STATE_LIFT_STOPPED_UP
         
         elif ind == protocol.Ind.IND_PLINKY_PLONKY_SENSOR_TRIGGERED_REFERENCE:
-            self.plinky_plonky_sensors.setdefault(ip, {})['reference'] = bool(value)
+            self._plinky_plonky_sensor.setdefault(ip, {})['reference'] = bool(value)
             if value:
-                self.plinky_plonky_state[ip] = protocol.State.STATE_PLINKY_PLONKY_STOPPED_AT_REFERENCE
+                self._plinky_plonky_state[ip] = protocol.State.STATE_PLINKY_PLONKY_STOPPED_AT_REFERENCE
     
     # ===== Status APIs with Sensor Fallback =====
     
-    def get_lift_state(self, ip=None):
+    def lift_state(self, ip=None):
         """Get lift state"""
         if ip is None:
             ip = self.get_ip_lift()
-        return self.lift_state.get(ip)
+        return self._lift_state[ip]
     
     def is_lift_up(self, ip=None):
         """Check if lift is at the up position.
@@ -247,11 +247,11 @@ class MusicalBoxManager(Esp32Server):
         """
         if ip is None:
             ip = self.get_ip_lift()
-        state = self.lift_state.get(ip)
+        state = self._lift_state[ip]
         if state == protocol.State.STATE_LIFT_STOPPED_UP:
             return True
         # If state unknown, use limit sensor
-        if state is None and self.lift_sensors.get(ip, {}).get('limit', False):
+        if state is None and self._lift_sensors.get(ip, {}).get('limit', False):
             return True
         return False
     
@@ -261,11 +261,11 @@ class MusicalBoxManager(Esp32Server):
         """
         if ip is None:
             ip = self.get_ip_lift()
-        state = self.lift_state.get(ip)
+        state = self._lift_state[ip]
         if state == protocol.State.STATE_LIFT_STOPPED_DOWN:
             return True
         # If state unknown, use down sensor
-        if state is None and self.lift_sensors.get(ip, {}).get('down', False):
+        if state is None and self._lift_sensors.get(ip, {}).get('down', False):
             return True
         return False
     
@@ -273,15 +273,16 @@ class MusicalBoxManager(Esp32Server):
         """Check if lift is currently moving"""
         if ip is None:
             ip = self.get_ip_lift()
-        state = self.lift_state.get(ip)
+        state = self._lift_state[ip]
         return state in [protocol.State.STATE_LIFT_RISING, protocol.State.STATE_LIFT_LOWERING]
     
-    def get_door_state(self, ip=None, index=None):
-        """Get door state for a specific door or all doors"""
+    def door_state(self, ip=None, index=None):
+        """Get door state for a specific door or all doors (the latter as a dictionary)"""
         if ip is None and index is not None:
             ip = self.get_ip_door(index)
-            return self.doors_state.get(ip)
-        return self.doors_state.copy()
+        if ip:
+            return self._door_state[ip]    
+        return self._door_state.copy()
     
     def is_door_open(self, ip=None, index=None):
         """Check if door is open.
@@ -290,14 +291,14 @@ class MusicalBoxManager(Esp32Server):
         if ip is None and index is not None:
             ip = self.get_ip_door(index)
         if ip:
-            state = self.doors_state.get(ip)
+            state = self._door_state.get(ip)
             if state == protocol.State.STATE_DOOR_STOPPED_OPEN:
                 return True
             # If state unknown, use sensor
-            if state is None and self.door_sensors.get(ip, {}).get('open', False):
+            if state is None and self._door_sensors.get(ip, {}).get('open', False):
                 return True
             return False
-        return any(self.is_door_open(ip) for ip in self.doors_state.keys())
+        return any(self.is_door_open(ip) for ip in self._door_state.keys())
     
     def is_door_possibly_closed(self, ip=None, index=None):
         """Check if a door might be closed.
@@ -309,37 +310,37 @@ class MusicalBoxManager(Esp32Server):
             if self.is_door_open(ip):
                 return False
             return True
-        return any(self.is_door_possibly_closed(ip) for ip in self.doors_state.keys())
+        return any(self.is_door_possibly_closed(ip) for ip in self._door_state.keys())
     
     def is_door_moving(self, ip=None, index=None):
         """Check if door is currently moving"""
         if ip is None and index is not None:
             ip = self.get_ip_door(index)
         if ip:
-            state = self.doors_state.get(ip)
+            state = self._door_state.get(ip)
             return state in [protocol.State.STATE_DOOR_OPENING, protocol.State.STATE_DOOR_CLOSING]
         return any(state in [protocol.State.STATE_DOOR_OPENING, protocol.State.STATE_DOOR_CLOSING] 
-                  for state in self.doors_state.values())
+                  for state in self._door_state.values())
     
-    def get_stand_state(self, ip=None):
+    def stand_state(self, ip=None):
         """Get stand state"""
         if ip is None:
             ip = self.get_ip_stand()
-        return self.stand_state.get(ip)
+        return self._stand_state[ip]
     
     def is_stand_rotating(self, ip=None):
         """Check if stand is rotating"""
         if ip is None:
             ip = self.get_ip_stand()
-        state = self.stand_state.get(ip)
+        state = self._stand_state.get(ip)
         return state in [protocol.State.STATE_STAND_ROTATING_CLOCKWISE, 
                        protocol.State.STATE_STAND_ROTATING_ANTICLOCKWISE]
     
-    def get_plinky_plonky_state(self, ip=None):
+    def plinky_plonky_state(self, ip=None):
         """Get plinky-plonky state"""
         if ip is None:
             ip = self.get_ip_plinky_plonky()
-        return self.plinky_plonky_state.get(ip)
+        return self._plinky_plonky_state[ip]
     
     def is_plinky_plonky_at_reference(self, ip=None):
         """Check if plinky-plonky is at reference position.
@@ -347,11 +348,11 @@ class MusicalBoxManager(Esp32Server):
         """
         if ip is None:
             ip = self.get_ip_plinky_plonky()
-        state = self.plinky_plonky_state.get(ip)
+        state = self._plinky_plonky_state.get(ip)
         if state == protocol.State.STATE_PLINKY_PLONKY_STOPPED_AT_REFERENCE:
             return True
         # If state unknown, use reference sensor
-        if state is None and self.plinky_plonky_sensors.get(ip, {}).get('reference', False):
+        if state is None and self._plinky_plonky_sensor.get(ip, {}).get('reference', False):
             return True
         return False
     
@@ -359,7 +360,7 @@ class MusicalBoxManager(Esp32Server):
         """Check if plinky-plonky is playing"""
         if ip is None:
             ip = self.get_ip_plinky_plonky()
-        return self.plinky_plonky_state.get(ip) == protocol.State.STATE_PLINKY_PLONKY_PLAYING
+        return self._plinky_plonky_state.get(ip) == protocol.State.STATE_PLINKY_PLONKY_PLAYING
     
     # ===== Enhanced Command Methods with Automatic State Tracking =====
     

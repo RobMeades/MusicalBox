@@ -410,7 +410,7 @@ static void stall_task(void *arg)
 #if !defined(CONFIG_STEPPER_PRODUCTION_MODE)
 
 #  if (defined(CONFIG_STEPPER_DOOR_OPEN_PIN) && (CONFIG_STEPPER_DOOR_OPEN_PIN >= 0)) || \
-      (defined(CONFIG_STEPPER_PLINKY_PLONKY_REFERENCE_PIN) && (CONFIG_STEPPER_PLINKY_PLONKY_REFERENCE_PIN >= 0)))
+      (defined(CONFIG_STEPPER_PLINKY_PLONKY_REFERENCE_PIN) && (CONFIG_STEPPER_PLINKY_PLONKY_REFERENCE_PIN >= 0))
 
 #    if defined(CONFIG_STEPPER_PLINKY_PLONKY_REFERENCE_PIN) && (CONFIG_STEPPER_PLINKY_PLONKY_REFERENCE_PIN >= 0)
 // Return true if the plinky-plonky is at its reference position,
@@ -1416,6 +1416,7 @@ static void monitor_task(void *arg)
     context_state_t *context_state = &context->context_state;
     ind_msg_t ind = {0};
     ind.magic = PROTOCOL_MAGIC_IND;
+    state_t previous_state = STATE_NULL;
 
     // Allow us to feed the watchdog
     esp_task_wdt_add(NULL);
@@ -1437,41 +1438,41 @@ static void monitor_task(void *arg)
 
         // Read all of the sensors and send indications
         // as necessary
-        bool previous_state;
+        bool previous_sensor_state;
         if (we_are_lift(context_state->init)){
-            previous_state = context_sensor->is_down;
+            previous_sensor_state = context_sensor->is_down;
             context_sensor->is_down = is_down();
-            if (previous_state != context_sensor->is_down) {
+            if (previous_sensor_state != context_sensor->is_down) {
                 ind.ind = IND_LIFT_SENSOR_TRIGGERED_LIFT_DOWN;
-                ind.value = !previous_state;
+                ind.value = !previous_sensor_state;
                 send_tx_data((uint8_t *) &ind, sizeof(ind), context->socket);
                 ESP_LOGI(TAG, "Sent IND_LIFT_SENSOR_TRIGGERED_LIFT_DOWN.");
             }
-            previous_state = context_sensor->is_at_limit;
+            previous_sensor_state = context_sensor->is_at_limit;
             context_sensor->is_at_limit = is_at_limit();
-            if (previous_state != context_sensor->is_at_limit) {
+            if (previous_sensor_state != context_sensor->is_at_limit) {
                 ind.ind = IND_LIFT_SENSOR_TRIGGERED_LIFT_LIMIT;
-                ind.value = !previous_state;
+                ind.value = !previous_sensor_state;
                 send_tx_data((uint8_t *) &ind, sizeof(ind), context->socket);
                 ESP_LOGI(TAG, "Sent IND_LIFT_SENSOR_TRIGGERED_LIFT_LIMIT.");
             }
         }
         if (we_are_plinky_plonky(context_state->init)){
-            previous_state = context_sensor->is_at_reference;
+            previous_sensor_state = context_sensor->is_at_reference;
             context_sensor->is_at_reference = is_at_reference();
-            if (previous_state != context_sensor->is_at_reference) {
+            if (previous_sensor_state != context_sensor->is_at_reference) {
                 ind.ind = IND_PLINKY_PLONKY_SENSOR_TRIGGERED_REFERENCE;
-                ind.value = !previous_state;
+                ind.value = !previous_sensor_state;
                 send_tx_data((uint8_t *) &ind, sizeof(ind), context->socket);
                 ESP_LOGI(TAG, "Sent IND_PLINKY_PLONKY_SENSOR_TRIGGERED_REFERENCE.");
             }
         }
         if (we_are_door(context_state->init)){
-            previous_state = context_sensor->is_open;
+            previous_sensor_state = context_sensor->is_open;
             context_sensor->is_open = is_open();
-            if (previous_state != context_sensor->is_open) {
+            if (previous_sensor_state != context_sensor->is_open) {
                 ind.ind = IND_DOOR_SENSOR_TRIGGERED_DOOR_OPEN;
-                ind.value = !previous_state;
+                ind.value = !previous_sensor_state;
                 send_tx_data((uint8_t *) &ind, sizeof(ind), context->socket);
                 ESP_LOGI(TAG, "Sent IND_DOOR_SENSOR_TRIGGERED_DOOR_OPEN.");
             }
@@ -1479,6 +1480,11 @@ static void monitor_task(void *arg)
 
         // Update our state
         get_state(context_state);
+        if (context_state->current_state != previous_state) {
+            ESP_LOGI(TAG, "State change 0x%04x -> 0x%04x.",
+                     previous_state, context_state->current_state);
+            previous_state = context_state->current_state;
+        }
 
         if (context_state->cmd_running) {
             // Check the stop callback, if there is one
@@ -1495,7 +1501,7 @@ static void monitor_task(void *arg)
                     context_state->cmd_running = false;
                     stop_motor();
                     ind.ind = IND_SYSTEM_STEPPER_TARGET_END;
-                    ind.value = STATUS_ERROR_TIMEOUT;
+                    ind.value = STATUS_OK;
                     send_tx_data((uint8_t *) &ind, sizeof(ind), context->socket);
                     ESP_LOGW(TAG, "Sent IND_SYSTEM_STEPPER_TARGET_END, timeout.");
                 }
@@ -1722,7 +1728,7 @@ static cmd_or_qry_t *process_rx_data(uint8_t *buffer, int32_t *len,
                 if (context->buffer_index >= sizeof(cmd_msg_t)) {
                     context->cmd_or_qry.cmd_not_qry = true;
                     cmd_or_qry = &(context->cmd_or_qry);
-                    ESP_LOGI(TAG, "Received command 0x%02x, reference %d,"
+                    ESP_LOGI(TAG, "Received command 0x%04x, reference %d,"
                              " parameters 0x%x, 0x%x, 0x%x, 0x%x.",
                              context->cmd_or_qry.cmd.command,
                              context->cmd_or_qry.cmd.reference,
@@ -1741,7 +1747,7 @@ static cmd_or_qry_t *process_rx_data(uint8_t *buffer, int32_t *len,
                 if (context->buffer_index >= sizeof(qry_msg_t)) {
                     context->cmd_or_qry.cmd_not_qry = false;
                     cmd_or_qry = &(context->cmd_or_qry);
-                    ESP_LOGI(TAG, "Received query 0x%02x, reference %d.",
+                    ESP_LOGI(TAG, "Received query 0x%04x, reference %d.",
                              context->cmd_or_qry.qry.query,
                              context->cmd_or_qry.qry.reference);
                 }
@@ -1825,6 +1831,8 @@ static void comms_rx_task(void *arg)
                             rsp.status = answer_qry(cmd_or_qry->qry.query, &value,
                                                     &context->context_state);
                             rsp.value = value;
+                            ESP_LOGI(TAG, "Sending query response 0x%04x, reference %d.",
+                                     rsp.value, rsp.reference);
                         } else {
                             // Got a command: set it in motion
                             rsp.reference = cmd_or_qry->cmd.reference;

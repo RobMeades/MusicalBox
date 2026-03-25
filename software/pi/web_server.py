@@ -210,7 +210,6 @@ class WebControlInterface:
         
         # Track the last count for this client
         last_count = 0
-        print(f"DEBUG: Logs stream started for client {client_id}")
         
         try:
             while self.running:
@@ -239,7 +238,6 @@ class WebControlInterface:
             print(f"DEBUG: Logs stream error: {e}")
         finally:
             self.sse_clients.discard(client_id)
-            print(f"DEBUG: Logs stream ended for client {client_id}")
         
         return response
 
@@ -343,7 +341,7 @@ class WebControlInterface:
                 result['message'] = 'Stand stop requested'
 
             elif command == 'plinky_plonky_play':
-                self.manager.plinky_plonky_play(opposites_day=False)
+                self.manager.plinky_plonky_play()
                 result['message'] = 'Plinky-plonky playing'
 
             elif command == 'plinky_plonky_stop':
@@ -352,7 +350,7 @@ class WebControlInterface:
 
             elif command == 'door_open':
                 index = params.get('index', -1)
-                self.manager.door_open(index=index, opposites_day=False)
+                self.manager.door_open(index=index)
                 result['message'] = f'Door {index if index >= 0 else "all"} opening'
 
             elif command == 'door_close':
@@ -365,13 +363,13 @@ class WebControlInterface:
                 self._log_message("Checking if doors are open...")
 
                 # First, log current door states
-                doors_state = self.manager.get_door_state()
-                self._log_message(f"Current door states: {doors_state}")
+                door_state_dict = self.manager.door_state()
+                self._log_message(f"Current door states: {str(door_state_dict)}")
 
                 # Also log which devices are doors
                 for ip, info in self.manager.devices.items():
-                    if info["init"] == protocol.Cmd.CMD_DOOR_INIT:
-                        self._log_message(f"Door device {ip}: init_done={info['init_done']}, state={self.manager.doors_state.get(ip)}")
+                    if self.manager.is_door(ip):
+                        self._log_message(f"Door device {ip}: initialised={info['initialised']}, state={self.manager.door_state(ip)}")
 
                 # Check if doors are open
                 doors_open = await self._check_doors_open()
@@ -411,6 +409,27 @@ class WebControlInterface:
         self.log_entries.append(f"[{timestamp}] {message}")
         self._log_version += 1
 
+    def _query_door_sensors(self):
+        door_count = 0
+        self._log_message("Querying door sensors...")
+        for ip, info in self.manager.devices.items():
+            if self.manager.is_door(ip):
+                door_count += 1
+                self.manager.query_door_sensor(ip)
+        return door_count
+
+    def _count_and_print_door_states(self):
+        open_count = 0
+        self._log_message("Current door states:")
+        for ip, info in self.manager.devices.items():
+            if self.manager.is_door(ip):
+                state = self.manager.door_state(ip)
+                sensor = self.manager._door_sensors.get(ip, {}).get('open', False)
+                self._log_message(f"  Door {ip}: state={state}, sensor={sensor}")
+                if sensor:
+                    open_count += 1
+        return open_count
+
     async def _run_open_sequence(self):
         """Run the complete open sequence"""
         self.operation_status = "running"
@@ -419,30 +438,16 @@ class WebControlInterface:
         self._status_version += 1
         
         try:
-            # Query door sensors to get reliable position
-            door_count = 0
-            self._log_message("Querying door sensors...")
-            for ip, info in self.manager.devices.items():
-                if self.manager.is_door(ip):
-                    door_count += 1
-                    self.manager.query_door_sensor(ip)
+            # Query door sensors (to make sure none are already open)
+            door_count = self._query_door_sensors()
             
             # Wait for responses
             await asyncio.sleep(2)
 
             # Check and log the current door states
-            self._log_message("Current door states:")
-            open_count = 0
-            for ip, info in self.manager.devices.items():
-                if self.manager.is_door(ip):
-                    state = self.manager.doors_state.get(ip)
-                    sensor = self.manager.door_sensors.get(ip, {}).get('open', False)
-                    self._log_message(f"  Door {ip}: state={state}, sensor={sensor}")
-                    if sensor:
-                        open_count += 1
+            open_count = self._count_and_print_door_states()
 
             if open_count == 0:        
-
                 self._log_message("Starting music and rotation...")
                 self.manager.plinky_plonky_play()
                 self.manager.stand_rotate_clockwise()
@@ -457,32 +462,33 @@ class WebControlInterface:
                 await asyncio.sleep(5)
 
                 # Log the current door states
-                open_count = 0
-                self._log_message("Current door states:")
-                for ip, info in self.manager.devices.items():
-                    if self.manager.is_door(ip):
-                        state = self.manager.doors_state.get(ip)
-                        sensor = self.manager.door_sensors.get(ip, {}).get('open', False)
-                        self._log_message(f"  Door {ip}: state={state}, sensor={sensor}")
-                        if sensor:
-                            open_count += 1
-
-                if open_count == door_count:
-                    # Raise lift
-                    self._log_message("Raising lift...")
-                    self.manager.lift_up()
-                else:
-                    self._log_message(f"Not raising the lift as only {open_count}"
-                                      f" out of {door_count} door(s) are open")
+                open_count = self._count_and_print_door_states()
+                if open_count < door_count:
+                    self._log_message(f"Only {open_count} out of {door_count} door sensors"
+                                      " indicate open but sensors can be affected by"
+                                      " ambient light so raising lift anyway")
+                    
+                # Raise lift
+                self._log_message("Raising lift...")
+                self.manager.lift_up()
             else:
                 self._log_message("Not starting the open sequence as there are"
                                   f" {open_count} door(s) already open")
 
             self._log_message("Waiting for music to stop...")
-            await asyncio.sleep(60)
-            #while not self.manager.is_plinky_plonky_at_reference():
-            #    await asyncio.sleep(1)
+            wait_guard_seconds = 0
+            self.manager.query_plinky_plonky_state()
+            # Wait for response
+            await asyncio.sleep(1)
+            while (not self.manager.is_plinky_plonky_at_reference()) and wait_guard_seconds < 60:
+                self.manager.query_plinky_plonky_state()
+                await asyncio.sleep(1)
+                wait_guard_seconds += 1
 
+            if wait_guard_seconds >= 60:
+                 self._log_message("Plinky-plonky did not signal reference position"
+                                   f" within {wait_guard_seconds} second(s), considering"
+                                   f" the sequence completed anyway.")
             self.operation_status = "completed"
             self._log_message("Open sequence completed")
             
@@ -511,50 +517,43 @@ class WebControlInterface:
             self._log_message("Lowering lift...")
             self.manager.lift_up(opposites_day=True)
             lift_down_wait_seconds = 15
+            self.manager.query_lift_state()
+            # Wait for response
+            await asyncio.sleep(1)
             while not self.manager.is_lift_down() and lift_down_wait_seconds > 0:
+                self.manager.query_lift_state()
                 await asyncio.sleep(1)
                 lift_down_wait_seconds -= 1
 
             if lift_down_wait_seconds > 0:
                 # Log the current door states
-                door_count = 0
-                open_count = 0
-                self._log_message("Current door states:")
-                for ip, info in self.manager.devices.items():
-                    if info["init"] == protocol.Cmd.CMD_DOOR_INIT:
-                        door_count += 1
-                        state = self.manager.doors_state.get(ip)
-                        sensor = self.manager.door_sensors.get(ip, {}).get('open', False)
-                        self._log_message(f"  Door {ip}: state={state}, sensor={sensor}")
-                        if sensor:
-                            open_count += 1
+                open_count = self._count_and_print_door_states()
 
-                if open_count == door_count:
-                    self._log_message("Closing doors...")
-                    self.manager.door_open(opposites_day=True)
+                self._log_message("Closing doors...")
+                self.manager.door_open(opposites_day=True)
 
-                    self._log_message("Waiting 5 seconds...")
-                    await asyncio.sleep(5)
+                self._log_message("Waiting 5 seconds...")
+                await asyncio.sleep(5)
 
-                    # Log the current door states
-                    open_count = 0
-                    self._log_message("Current door states:")
-                    for ip, info in self.manager.devices.items():
-                        if info["init"] == protocol.Cmd.CMD_DOOR_INIT:
-                            state = self.manager.doors_state.get(ip)
-                            sensor = self.manager.door_sensors.get(ip, {}).get('open', False)
-                            self._log_message(f"  Door {ip}: state={state}, sensor={sensor}")
-
-                else:
-                    self._log_message("Not closing the doors as"
-                                      f" {door_count - open_count} door(s) already closed")
+                # Log the current door states
+                open_count = self._count_and_print_door_states()
 
             else:
                 self._log_message("Not closing the doors as the lift did not get down")
 
-            self._log_message("Waiting for music to stop...")
-            while not self.manager.is_plinky_plonky_at_reference():
+            wait_guard_seconds = 0
+            self.manager.query_plinky_plonky_state()
+            # Wait for response
+            await asyncio.sleep(1)
+            while (not self.manager.is_plinky_plonky_at_reference()) and wait_guard_seconds < 60:
+                self.manager.query_plinky_plonky_state()
                 await asyncio.sleep(1)
+                wait_guard_seconds += 1
+
+            if wait_guard_seconds >= 60:
+                 self._log_message("Plinky-plonky did not signal reference position"
+                                   f" within {wait_guard_seconds} second(s), considering"
+                                   f" the sequence completed anyway.")
 
             self.operation_status = "completed"
             self._log_message("Close sequence completed")
@@ -573,13 +572,13 @@ class WebControlInterface:
         for ip, info in self.manager.devices.items():
             if self.manager.is_door(ip):
                 # 1. First check sensor - if triggered, door is definitely open
-                sensor = self.manager.door_sensors.get(ip, {})
-                if sensor.get('open', False):
+                sensors = self.manager._door_sensors.get(ip, {})
+                if sensors.get('open', False):
                     self._log_message(f"Door {ip} is OPEN (sensor triggered)")
                     return True
                 
                 # 2. If no sensor trigger, check door state
-                state = self.manager.doors_state.get(ip)
+                state = self.manager.door_state(ip)
                 if state == protocol.State.STATE_DOOR_STOPPED_OPEN:
                     self._log_message(f"Door {ip} is OPEN (state={state})")
                     return True
@@ -599,23 +598,21 @@ class WebControlInterface:
     def _get_system_status(self):
         """Get current system status for API"""
         try:
-            doors_state = self.manager.get_door_state()
-            
-            init_done = [ip for ip, info in self.manager.devices.items() if info.get("init_done", False)]
-            connected = self.manager.get_connected_devices()
-            total = len(self.manager.devices)
+            device_connected_ip_list = self.manager.get_device_ip_list(required=True, connected=True)
+            device_initialised_ip_list = self.manager.get_device_ip_list(required=True, initialised=True)
+            total = self.manager.device_count(required=True)
             
             # These now return single values (int) for the unique devices
-            lift_state = self.manager.get_lift_state()
-            stand_state = self.manager.get_stand_state()
-            plinky_state = self.manager.get_plinky_plonky_state()
+            lift_state = self.manager.lift_state()
+            stand_state = self.manager.stand_state()
+            plinky_plonky_state = self.manager.plinky_plonky_state()
             
             # Doors still have multiple devices, so we need a dictionary
-            doors_state = self.manager.get_door_state()  # This returns a dict of all doors
+            door_state_dict = self.manager.door_state()  # This returns a dict of all doors
             
             return {
-                'connected_devices': connected,
-                'initialized_devices': init_done,
+                'device_connected_ip_list': device_connected_ip_list,
+                'device_initialised_ip_list': device_connected_ip_list,
                 'total_devices': total,
                 'auto_run': {
                     'enabled': self.auto_run_enabled,
@@ -628,9 +625,9 @@ class WebControlInterface:
                     'start_time': self.operation_start_time.isoformat() if self.operation_start_time else None
                 },
                 'lift_state': self._format_state_dict(lift_state),
-                'doors_state': self._format_state_dict(doors_state),
+                'door_state_dict': self._format_state_dict(door_state_dict),
                 'stand_state': self._format_state_dict(stand_state),
-                'plinky_plonky_state': self._format_state_dict(plinky_state)
+                'plinky_plonky_state': self._format_state_dict(plinky_plonky_state)
             }
         except Exception as e:
             print(f"ERROR in _get_system_status: {e}")
@@ -682,20 +679,43 @@ class WebControlInterface:
 
     async def _auto_run_loop(self):
         """Background task for auto-run"""
+        last_run = None        
         while self.auto_run_enabled:
             try:
                 if self.operation_status == "idle" or self.operation_status == "completed":
                     if self.auto_run_sequence == "open_close":
+                        # Store the start time before running
+                        sequence_start = time.time()
+                        
                         await self._run_open_sequence()
-                        await asyncio.sleep(10)
+                        await asyncio.sleep(30)
                         await self._run_close_sequence()
-                await asyncio.sleep(self.auto_run_interval)
-
+                        
+                        # Update last run time
+                        last_run = sequence_start if last_run is None else sequence_start
+                        
+                        # Calculate remaining time to maintain fixed interval
+                        elapsed = time.time() - sequence_start
+                        remaining = max(0, self.auto_run_interval - elapsed)
+                        
+                        if remaining > 0:
+                            try:
+                                await asyncio.sleep(remaining)
+                            except asyncio.CancelledError:
+                                break
+                    else:
+                        # For other sequences, just use the interval
+                        await asyncio.sleep(self.auto_run_interval)
+                else:
+                    # Not idle or completed, just wait and check again
+                    await asyncio.sleep(1)
+                    
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 self._log_message(f"Auto-run error: {e}")
-
+                await asyncio.sleep(self.auto_run_interval)
+ 
     def _get_html_template(self):
         """Return the HTML template as a string"""
         return '''<!DOCTYPE html>
@@ -988,7 +1008,7 @@ class WebControlInterface:
                 </div>
                 <div class="settings-row">
                     <span class="label">Interval (seconds):</span>
-                    <input type="number" id="interval" value="300" min="10" step="10" onchange="setInterval(this.value)">
+                    <input type="number" id="interval" value="300" min="10" step="10" onblur="setInterval(this.value)">
                     <span>seconds</span>
                 </div>
                 <div class="settings-row">
@@ -1023,7 +1043,7 @@ class WebControlInterface:
     </div>
 
     <div class="footer">
-        Musical Box Controller | Read-only system
+        Musical Box Controller
     </div>
 
     <script>
@@ -1181,7 +1201,13 @@ class WebControlInterface:
             // Update auto-run UI
             const auto = status.auto_run;
             document.querySelector(`input[name="auto_enabled"][value="${auto.enabled}"]`).checked = auto.enabled;
-            document.getElementById('interval').value = auto.interval;
+            
+            // Only update interval value if the field is NOT currently focused
+            const intervalField = document.getElementById('interval');
+            if (intervalField && document.activeElement !== intervalField) {
+                intervalField.value = auto.interval;
+            }
+            
             document.getElementById('sequence').value = auto.sequence;
             
             const autoStatusDiv = document.getElementById('autoStatus');
@@ -1202,8 +1228,8 @@ class WebControlInterface:
             
             // Update banner
             const totalDevices = status.total_devices;
-            const connectedCount = status.connected_devices.length;
-            const initializedCount = status.initialized_devices.length;
+            const connectedCount = status.device_connected_ip_list.length;
+            const initialisedCount = status.device_initialised_ip_list.length;
             
             const banner = document.getElementById('systemStatusBanner');
             if (banner) {
@@ -1211,26 +1237,22 @@ class WebControlInterface:
                 const bannerText = banner.querySelector('.status-text > div:first-child');
                 const bannerDetails = banner.querySelector('.status-details');
                 
-                if (initializedCount === totalDevices) {
-                    // All devices ready
+                if (initialisedCount === totalDevices) {
                     banner.className = 'status-banner ready';
                     if (bannerIcon) bannerIcon.textContent = '✅';
                     if (bannerText) bannerText.textContent = 'System Status: READY TO PLAY!';
-                    if (bannerDetails) bannerDetails.textContent = `All ${totalDevices} devices are connected and initialized.`;
+                    if (bannerDetails) bannerDetails.textContent = `All ${totalDevices} devices are connected and initialised.`;
                 } else if (connectedCount === totalDevices) {
-                    // All connected but some not initialized
                     banner.className = 'status-banner waiting';
                     if (bannerIcon) bannerIcon.textContent = '⏳';
                     if (bannerText) bannerText.textContent = 'System Status: Initializing...';
-                    if (bannerDetails) bannerDetails.textContent = `${initializedCount}/${totalDevices} devices ready, waiting for initialization to complete.`;
+                    if (bannerDetails) bannerDetails.textContent = `${initialisedCount}/${totalDevices} devices ready, waiting for initialisation to complete.`;
                 } else if (connectedCount > 0) {
-                    // Some devices connected
                     banner.className = 'status-banner waiting';
                     if (bannerIcon) bannerIcon.textContent = '🔌';
                     if (bannerText) bannerText.textContent = 'System Status: Connecting...';
                     if (bannerDetails) bannerDetails.textContent = `${connectedCount}/${totalDevices} devices connected. Waiting for more devices...`;
                 } else {
-                    // No devices connected
                     banner.className = 'status-banner waiting';
                     if (bannerIcon) bannerIcon.textContent = '⚠️';
                     if (bannerText) bannerText.textContent = 'System Status: Waiting for devices';
@@ -1241,11 +1263,10 @@ class WebControlInterface:
             // Update compact device grid
             let html = '<div class="compact-device-grid">';
             
-            // Unique devices (stand, lift, plinky) - these are single values, not dictionaries
             const uniqueDeviceIps = ['10.10.3.10', '10.10.3.20', '10.10.3.30'];
             for (let ip of uniqueDeviceIps) {
-                if (status.connected_devices.includes(ip)) {
-                    const initDone = status.initialized_devices.includes(ip);
+                if (status.device_connected_ip_list.includes(ip)) {
+                    const initDone = status.device_initialised_ip_list.includes(ip);
                     let deviceName = '';
                     let stateValue = '';
                     
@@ -1270,17 +1291,11 @@ class WebControlInterface:
                 }
             }
             
-            // Doors - these are in a dictionary
-            for (let ip of status.connected_devices) {
+            for (let ip of status.device_connected_ip_list) {
                 if (ip.startsWith('10.10.3.4')) {
-                    const initDone = status.initialized_devices.includes(ip);
-                    // Extract door number - handle both single and double-digit numbers
-                    let doorNum = ip.split('.').pop();  // Gets the last part of the IP
-                    // If the door number has a leading zero? No, it should be just the number
-                    const doorState = status.doors_state[ip];
-                    
-                    // Debug: log door status
-                    console.log(`Door ${doorNum} (${ip}): state =`, doorState);
+                    const initDone = status.device_initialised_ip_list.includes(ip);
+                    let doorNum = ip.split('.').pop();
+                    const doorState = status.door_state_dict[ip];
                     
                     html += `<div class="compact-device-card ${initDone ? '' : 'offline'}">
                                 <div class="name">Door ${doorNum}</div>
@@ -1381,67 +1396,62 @@ class WebControlInterface:
             }
         }
 
-    // Initialize SSE connections
-    console.log("DEBUG: Setting up SSE connections...");
-
-    function setupStatusStream() {
-        if (!window.EventSource) return;
-        
-        console.log("DEBUG: Creating status stream...");
-        const source = new EventSource('/api/status/stream');
-        
-        source.onmessage = function(event) {
-            try {
-                const status = JSON.parse(event.data);
-                updateUI(status);
-            } catch (e) {
-                console.error("Error parsing status:", e);
-            }
-        };
-        
-        source.onerror = function() {
-            console.log('Status stream error, reconnecting in 5 seconds...');
-            source.close();
-            setTimeout(setupStatusStream, 5000);
-        };
-        
-        statusSource = source;
-    }
-
-    function setupLogsStream() {
-        if (!window.EventSource) return;
-        
-        console.log("DEBUG: Creating logs stream...");
-        const source = new EventSource('/api/logs/stream');
-        
-        source.onmessage = function(event) {
-            try {
-                const newLogs = JSON.parse(event.data);
-                if (newLogs.length > 0) {
-                    appendLogs(newLogs);
+        // Initialize SSE connections
+        function setupStatusStream() {
+            if (!window.EventSource) return;
+            
+            const source = new EventSource('/api/status/stream');
+            
+            source.onmessage = function(event) {
+                try {
+                    const status = JSON.parse(event.data);
+                    updateUI(status);
+                } catch (e) {
+                    console.error("Error parsing status:", e);
                 }
-            } catch (e) {
-                console.error("Error parsing logs:", e);
-            }
-        };
-        
-        source.onerror = function() {
-            console.log('Logs stream error, reconnecting in 5 seconds...');
-            source.close();
-            setTimeout(setupLogsStream, 5000);
-        };
-        
-        logsSource = source;
-    }
+            };
+            
+            source.onerror = function() {
+                console.log('Status stream error, reconnecting in 5 seconds...');
+                source.close();
+                setTimeout(setupStatusStream, 5000);
+            };
+            
+            statusSource = source;
+        }
 
-    // Start the streams
-    // Add a small delay before starting SSE to ensure page is fully loaded
-    setTimeout(() => {
-        console.log("DEBUG: Starting SSE connections after page load...");
-        setupStatusStream();
-        setupLogsStream();
-    }, 1000);
-    setupDebugWindow();
+        function setupLogsStream() {
+            if (!window.EventSource) return;
+            
+            const source = new EventSource('/api/logs/stream');
+            
+            source.onmessage = function(event) {
+                try {
+                    const newLogs = JSON.parse(event.data);
+                    if (newLogs.length > 0) {
+                        appendLogs(newLogs);
+                    }
+                } catch (e) {
+                    console.error("Error parsing logs:", e);
+                }
+            };
+            
+            source.onerror = function() {
+                console.log('Logs stream error, reconnecting in 5 seconds...');
+                source.close();
+                setTimeout(setupLogsStream, 5000);
+            };
+            
+            logsSource = source;
+        }
+
+        // Start the streams
+        // Add a small delay before starting SSE to ensure page is fully loaded
+        setTimeout(() => {
+            setupStatusStream();
+            setupLogsStream();
+        }, 1000);
+        setupDebugWindow();
     </script>
 </body>
 </html>'''
@@ -1482,7 +1492,7 @@ def main(http_port, esp32_port):
     web_thread.start()
 
     try:
-        # Wait for all devices to connect and initialize
+        # Wait for all devices to connect and initialise
         if manager.wait_for_all_devices():
             print("Querying the state of all devices...")
             manager.query_stand_state()
@@ -1502,7 +1512,7 @@ def main(http_port, esp32_port):
                 except queue.Empty:
                     time.sleep(0.1)
         else:
-            print("Failed to connect and initialize all devices")
+            print("Failed to connect and initialise all devices")
 
     except KeyboardInterrupt:
         print("\nShutting down...")
