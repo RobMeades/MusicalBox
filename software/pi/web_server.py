@@ -388,6 +388,10 @@ class WebControlInterface:
                 self.manager.lift_up(opposites_day=True)
                 result['message'] = 'Lift lowering'
 
+            elif command == 'lift_stop':
+                self.manager.lift_stop()
+                result['message'] = 'Stopping lift'
+
             elif command == 'reboot_all':
                 self.manager.reboot_all()
                 result['message'] = 'Rebooting all devices'
@@ -840,6 +844,8 @@ class WebControlInterface:
         .btn-lift-primary:hover { background: #004d40; }
         .btn-lift-secondary { background: #009688; color: white; }
         .btn-lift-secondary:hover { background: #00796b; }
+        .btn-lift-tertiary { background: #26a69a; color: white; }
+        .btn-lift-tertiary:hover { background: #009688; }
 
         /* Door group - Orange shades */
         .btn-door-primary { background: #e65100; color: white; }
@@ -983,6 +989,8 @@ class WebControlInterface:
                 <div class="button-group">
                     <button class="btn-lift-primary" onclick="sendCommand('lift_up')">⬆️ Raise Lift</button>
                     <button class="btn-lift-secondary" onclick="sendCommand('lift_down')">⬇️ Lower Lift</button>
+                    <button class="btn-lift-tertiary" onclick="sendCommand('lift_stop')">⬇️ Stop Lift</button>
+
                 </div>
 
                 <!-- Door group -->

@@ -471,6 +471,15 @@ class MusicalBoxManager(Esp32Server):
                 self.send_cmd_stepper_target_start(f"{name_operation} lift", ip, info["name"], info["reference"], target_state, velocity_mhz, current_ma, timeout_ms)
                 info["reference"] = self.next_reference(info["reference"])
 
+    def lift_stop(self):
+        '''Helper function to stop the lift'''
+        target_state = protocol.State.STATE_LIFT_STOPPED_UNKNOWN
+        name_operation = "stop"
+        for ip, info in self.devices.items():
+            if info["init"] == protocol.Cmd.CMD_LIFT_INIT:
+                self.send_cmd_stepper_target_start(f"{name_operation} lift", ip, info["name"], info["reference"], target_state, 0, 0, 0)
+                info["reference"] = self.next_reference(info["reference"])
+
     def plinky_plonky_play(self, opposites_day=False):
         '''Helper function to play or stop the plinky-plonky'''
         velocity_mhz = (1000 * 64 * 11)
@@ -511,6 +520,8 @@ class MusicalBoxManager(Esp32Server):
         print("Requesting all devices to reboot.")
         for ip, info in self.devices.items():
             cmd = protocol.CmdMsg(protocol.Cmd.CMD_REBOOT, info["reference"], 0, 0, 0, 0)
+            info["initialised"] = False
+            self.devices[ip]["connected"]= False
             self.send_command(ip, cmd)
             info["reference"] = self.next_reference(info["reference"])
 
