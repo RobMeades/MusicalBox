@@ -52,7 +52,7 @@ The large parts, `bottom_inner` and `bottom_outer` will need supports but may be
 `door_x6` can be printed at fastest speed but will require supports.  When removing from the build plate, be carefuly not to bend them as their right-angledness is important.  You may wish to print an additional `door_x6` to use when test fitting flatted brass bar.
 
 ### `sides`
-`sides_lifting_plate` should be printed in a black flexible filament at fastest speed, 100% in-fill.  The remaining parts are printed in black ASA and PLA.
+`sides_lifting_plate` needs to be really light and flexible, not to get in the way of the lift's travel.  I tried printing it in black flexible filament but in the end I think this piece probably should not be used directly, just use it as a template for cutting out a hexagon of black paper.  The remaining parts are printed in black ASA and PLA.
 
 `sides_panel_outer` and `sides_panel_inner` I printed in PLA rather than ASA: these are rather thin and, like with the [music belts](../music) I couldn't make ASA behave; it would print but be slightly too "wiggly" in the vertical dimension to fit well on the musical box once printed.  The outer will be covered in the decoration of the musical box and the inner will be inside under the doors, so neither should be too exposed to sunlight.  `sides_panel_outer` can be printed at fastest speed, 100% in-fill, no supports or brim required, however it is quite important that `sides_panel_inner`, though tall and thin, does not come out with an warps/wiggles in it (or it may foul the lift or `sides_lifting_plate`) hence I printed that piece with the same settings as `music_1.blend` above to achieve a higher quality result.  The remaining parts are printed in black ASA.
 
