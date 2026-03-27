@@ -83,7 +83,7 @@
 
 // The maximum motor current to set, in milliAmps, used only
 // in production mode
-#define MOTOR_CURRENT_MAX_MA 1000
+#define MOTOR_CURRENT_MAX_MA 1200
 
 // The maximum motor current to set for a door, in milliAmps,
 // used only in production mode

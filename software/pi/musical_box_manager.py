@@ -469,7 +469,7 @@ class MusicalBoxManager(Esp32Server):
         '''Helper function to raise and lower the lift'''
         # Up is positive velocity
         velocity_mhz = (1000 * 64 * 17)
-        current_ma = 1000
+        current_ma = 1200
         target_state = protocol.State.STATE_LIFT_STOPPED_UP
         timeout_ms = 27000
         name_operation = "raise"
