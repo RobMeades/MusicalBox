@@ -116,7 +116,7 @@
 // How long to wait before checking the lift sensors so that
 // we don't get ourselves stuck moving out of the up or down
 // positions.
-#define HYSTERESIS_LIFT_MS 3000
+#define HYSTERESIS_LIFT_MS 5000
 
 // How long to wait before checking the plinky-plonky sensor
 // so that we are able to move away from it.

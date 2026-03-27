@@ -55,6 +55,17 @@ class MusicalBoxManager(Esp32Server):
         self._stand_state = {}  # ip -> current state (from STATE_STAND_*)
         self._plinky_plonky_state = {}  # ip -> current state (from STATE_PLINKY_PLONKY_*)
         
+        # Populate with None for all devices
+        for ip, info in self.devices.items():
+            if self.is_stand(ip):
+                self._stand_state[ip] = protocol.State.STATE_NULL
+            elif self.is_lift(ip):
+                self._lift_state[ip] = protocol.State.STATE_NULL
+            elif self.is_plinky_plonky(ip):
+                self._plinky_plonky_state[ip] = protocol.State.STATE_NULL
+            elif self.is_door(ip):
+                self._door_state[ip] = protocol.State.STATE_NULL
+
         # Track sensor states
         self._lift_sensors = {}  # ip -> {'down': bool, 'limit': bool}
         self._door_sensors = {}  # ip -> {'open': bool}
@@ -520,8 +531,6 @@ class MusicalBoxManager(Esp32Server):
         print("Requesting all devices to reboot.")
         for ip, info in self.devices.items():
             cmd = protocol.CmdMsg(protocol.Cmd.CMD_REBOOT, info["reference"], 0, 0, 0, 0)
-            info["initialised"] = False
-            self.devices[ip]["connected"]= False
             self.send_command(ip, cmd)
             info["reference"] = self.next_reference(info["reference"])
 
